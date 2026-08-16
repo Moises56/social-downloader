@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { detectPlatform, type DownloadRequest, type MediaMetadata } from '../domain/media-platform';
 import { YtDlpMediaExtractor } from '../infrastructure/yt-dlp/yt-dlp-media-extractor';
 import { validateUrlNoSsrf } from './ssrf-guard';
+import { Semaphore } from './semaphore';
 
 export const analyzeSchema = z.object({
   url: z.string().trim().url('INVALID_URL'),
@@ -32,6 +33,7 @@ const MAX_DOWNLOAD_SIZE_BYTES = (Number(process.env.MAX_DOWNLOAD_SIZE_MB) || 204
 @Injectable()
 export class MediaService {
   private readonly preparedDownloads = new Map<string, PreparedDownload>();
+  private readonly downloadSemaphore = new Semaphore(Number(process.env.MAX_CONCURRENT_DOWNLOADS) || 2);
 
   constructor(private readonly extractor: YtDlpMediaExtractor) {}
 
@@ -78,6 +80,7 @@ export class MediaService {
   }
 
   private async downloadWithStream(payload: DownloadRequest, res: Response, req?: Request): Promise<void> {
+    await this.downloadSemaphore.acquire();
     const url = await validateUrlNoSsrf(payload.url);
     const workDir = join(tmpdir(), 'social-downloader', randomUUID());
 
@@ -148,6 +151,8 @@ export class MediaService {
       }
       await this.cleanup(workDir);
       throw new InternalServerErrorException('DOWNLOAD_FAILED');
+    } finally {
+      this.downloadSemaphore.release();
     }
   }
 
