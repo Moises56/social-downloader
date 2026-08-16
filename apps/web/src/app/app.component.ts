@@ -1,29 +1,11 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
+import type { MediaPlatform, MediaFormat, MediaMetadata, DownloadType, AudioFormat } from '@social-downloader/contracts';
 
 const API_BASE_URL = 'http://localhost:3005';
 
-type MediaPlatform = 'youtube' | 'tiktok' | 'instagram' | 'facebook' | 'x';
-
-type MediaFormat = {
-  id: string;
-  ext: string;
-  resolution?: string;
-  width?: number;
-  height?: number;
-  container?: string;
-  filesize?: number;
-};
-
-type MediaMetadata = {
-  platform: MediaPlatform;
-  title: string;
-  author?: string;
-  duration?: number;
-  thumbnail?: string;
-  sourceUrl: string;
-  formats: MediaFormat[];
-};
+type MediaFormatUI = MediaFormat;
+type MediaMetadataUI = MediaMetadata;
 
 @Component({
   selector: 'app-root',
@@ -161,12 +143,12 @@ type MediaMetadata = {
 })
 export class AppComponent {
   url = '';
-  media: MediaMetadata | null = null;
+  media: MediaMetadataUI | null = null;
   loading = false;
   downloading = false;
   error: string | null = null;
   selectedQuality: number | null = null;
-  selectedAudioFormat: 'mp3' | 'm4a' | 'opus' | null = null;
+  selectedAudioFormat: AudioFormat | null = null;
 
   get videoQualities(): number[] {
     const formats = this.media?.formats ?? [];
@@ -179,7 +161,7 @@ export class AppComponent {
     return final.length > 0 ? final : heights.slice(0, 6);
   }
 
-  get audioFormats(): Array<'mp3' | 'm4a' | 'opus'> {
+  get audioFormats(): AudioFormat[] {
     return ['mp3', 'm4a', 'opus'];
   }
 
@@ -210,7 +192,7 @@ export class AppComponent {
           throw new Error(errorBody?.message ?? 'No se pudo analizar la URL.');
         }
 
-        const data = (await response.json()) as MediaMetadata;
+        const data = (await response.json()) as MediaMetadataUI;
         this.media = data;
         this.selectedQuality = this.videoQualities[0] ?? null;
         this.selectedAudioFormat = this.audioFormats[0] ?? null;
@@ -223,7 +205,7 @@ export class AppComponent {
       });
   }
 
-  download(type: 'video' | 'audio'): void {
+  download(type: DownloadType): void {
     const item = this.media;
     if (!item) return;
 
@@ -267,9 +249,9 @@ export class AppComponent {
 
   private prepareDownload(payload: {
     url: string;
-    type: 'video' | 'audio';
+    type: DownloadType;
     quality?: number;
-    audioFormat?: 'mp3' | 'm4a' | 'opus';
+    audioFormat?: AudioFormat;
   }): Promise<Response> {
     return fetch(`${API_BASE_URL}/api/media/download/prepare`, {
       method: 'POST',
@@ -289,7 +271,7 @@ export class AppComponent {
     return [minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
   }
 
-  private getSuggestedFilename(title: string, type: 'video' | 'audio', quality?: number | null, format?: 'mp3' | 'm4a' | 'opus' | null): string {
+  private getSuggestedFilename(title: string, type: DownloadType, quality?: number | null, format?: AudioFormat | null): string {
     const cleanTitle = title.replace(/[^a-z0-9\-_ ]/gi, '').trim().slice(0, 80) || 'download';
     if (type === 'video') {
       return `${cleanTitle}-${quality ?? 1080}p.mp4`;

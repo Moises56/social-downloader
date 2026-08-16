@@ -1,48 +1,5 @@
-export type MediaPlatform = 'youtube' | 'tiktok' | 'instagram' | 'facebook' | 'x';
-export type DownloadType = 'video' | 'audio';
-export type AudioFormat = 'mp3' | 'm4a' | 'opus';
-
-export interface MediaFormat {
-  id: string;
-  ext: string;
-  resolution?: string;
-  width?: number;
-  height?: number;
-  container?: string;
-  videoCodec?: string | null;
-  audioCodec?: string | null;
-  filesize?: number;
-  formatNote?: string;
-}
-
-export interface MediaMetadata {
-  platform: MediaPlatform;
-  title: string;
-  thumbnail?: string;
-  duration?: number;
-  author?: string;
-  sourceUrl: string;
-  formats: MediaFormat[];
-}
-
-export interface DownloadRequest {
-  url: string;
-  type: DownloadType;
-  quality?: number;
-  audioFormat?: AudioFormat;
-}
-
-export interface DownloadResult {
-  filePath: string;
-  fileName: string;
-  contentType: string;
-  size: number;
-}
-
-export interface ApiErrorShape {
-  code: string;
-  message: string;
-}
+import type { MediaPlatform } from '@social-downloader/contracts';
+export type { MediaPlatform, DownloadType, AudioFormat, MediaFormat, MediaMetadata, DownloadRequest, DownloadResult, ApiError } from '@social-downloader/contracts';
 
 export function detectPlatform(rawUrl: string): MediaPlatform {
   const url = normalizeUrl(rawUrl);
