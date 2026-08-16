@@ -238,26 +238,24 @@ export class AppComponent {
       ...(type === 'audio' && format ? { audioFormat: format } : {}),
     };
 
-    fetch(`${API_BASE_URL}/api/media/download`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    this.prepareDownload(payload)
       .then(async (response) => {
         if (!response.ok) {
           const errorBody = await response.json().catch(() => null);
-          throw new Error(errorBody?.message ?? 'No se pudo descargar el archivo.');
+          throw new Error(errorBody?.message ?? 'No se pudo preparar la descarga.');
         }
 
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
+        const data = (await response.json()) as { downloadUrl?: string };
+        if (!data.downloadUrl) {
+          throw new Error('No se recibió URL de descarga.');
+        }
+
         const anchor = document.createElement('a');
-        anchor.href = url;
+        anchor.href = `${API_BASE_URL}${data.downloadUrl}`;
         anchor.download = this.getSuggestedFilename(item.title, type, quality, format);
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
-        URL.revokeObjectURL(url);
       })
       .catch((error) => {
         this.error = error instanceof Error ? error.message : 'No se pudo iniciar la descarga.';
@@ -265,6 +263,19 @@ export class AppComponent {
       .finally(() => {
         this.downloading = false;
       });
+  }
+
+  private prepareDownload(payload: {
+    url: string;
+    type: 'video' | 'audio';
+    quality?: number;
+    audioFormat?: 'mp3' | 'm4a' | 'opus';
+  }): Promise<Response> {
+    return fetch(`${API_BASE_URL}/api/media/download/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   }
 
   formatDuration(totalSeconds: number): string {

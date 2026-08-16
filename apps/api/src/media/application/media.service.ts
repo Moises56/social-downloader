@@ -20,8 +20,17 @@ export const downloadSchema = z.object({
   audioFormat: z.enum(['mp3', 'm4a', 'opus']).optional(),
 });
 
+type PreparedDownload = {
+  request: DownloadRequest;
+  expiresAt: number;
+};
+
+const DOWNLOAD_TOKEN_TTL_MS = 2 * 60 * 1000;
+
 @Injectable()
 export class MediaService {
+  private readonly preparedDownloads = new Map<string, PreparedDownload>();
+
   constructor(private readonly extractor: YtDlpMediaExtractor) {}
 
   async analyze(rawUrl: string): Promise<MediaMetadata> {
@@ -37,6 +46,31 @@ export class MediaService {
   }
 
   async download(payload: DownloadRequest, res: Response): Promise<void> {
+    await this.downloadWithStream(payload, res);
+  }
+
+  prepareDownload(payload: DownloadRequest): { downloadUrl: string } {
+    const url = this.normalizeUrl(payload.url);
+    detectPlatform(url.href);
+
+    this.purgeExpiredDownloadTokens();
+    const token = randomUUID().replace(/-/g, '');
+    this.preparedDownloads.set(token, {
+      request: { ...payload, url: url.href },
+      expiresAt: Date.now() + DOWNLOAD_TOKEN_TTL_MS,
+    });
+
+    return {
+      downloadUrl: `/api/media/download/${token}`,
+    };
+  }
+
+  async downloadPrepared(token: string, res: Response): Promise<void> {
+    const prepared = this.consumePreparedDownload(token);
+    await this.downloadWithStream(prepared.request, res);
+  }
+
+  private async downloadWithStream(payload: DownloadRequest, res: Response): Promise<void> {
     const url = this.normalizeUrl(payload.url);
     const workDir = join(tmpdir(), 'social-downloader', randomUUID());
 
@@ -85,6 +119,30 @@ export class MediaService {
     } catch {
       await this.cleanup(workDir);
       throw new InternalServerErrorException('DOWNLOAD_FAILED');
+    }
+  }
+
+  private consumePreparedDownload(token: string): PreparedDownload {
+    this.purgeExpiredDownloadTokens();
+
+    const prepared = this.preparedDownloads.get(token);
+    if (!prepared) {
+      throw new BadRequestException('INVALID_DOWNLOAD_TOKEN');
+    }
+
+    this.preparedDownloads.delete(token);
+    if (prepared.expiresAt < Date.now()) {
+      throw new BadRequestException('INVALID_DOWNLOAD_TOKEN');
+    }
+
+    return prepared;
+  }
+
+  private purgeExpiredDownloadTokens(now = Date.now()): void {
+    for (const [token, prepared] of this.preparedDownloads.entries()) {
+      if (prepared.expiresAt < now) {
+        this.preparedDownloads.delete(token);
+      }
     }
   }
 

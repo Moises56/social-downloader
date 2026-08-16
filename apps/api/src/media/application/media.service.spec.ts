@@ -139,4 +139,32 @@ describe('MediaService download cleanup', () => {
 
     expect(rm).toHaveBeenCalledTimes(1);
   });
+
+  it('prepara token temporal y lo consume una sola vez', async () => {
+    const stream = new FakeStream();
+    vi.mocked(createReadStream).mockReturnValue(stream as never);
+    vi.mocked(statSync).mockReturnValue({ size: 1234 } as never);
+    vi.mocked(extractor.download).mockResolvedValue({
+      filePath: '/tmp/social-downloader/file.mp4',
+      fileName: 'file.mp4',
+      contentType: 'video/mp4',
+      size: 1234,
+    });
+
+    const prepared = service.prepareDownload({
+      url: 'https://youtube.com/shorts/demo',
+      type: 'video',
+      quality: 720,
+    });
+
+    const token = prepared.downloadUrl.split('/').at(-1);
+    expect(token).toBeTruthy();
+
+    const res = new FakeResponse();
+    await service.downloadPrepared(token!, res as never);
+
+    await expect(service.downloadPrepared(token!, new FakeResponse() as never)).rejects.toMatchObject({
+      message: 'INVALID_DOWNLOAD_TOKEN',
+    });
+  });
 });

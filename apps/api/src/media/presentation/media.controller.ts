@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Post, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { analyzeSchema, downloadSchema, MediaService } from '../application/media.service';
 
@@ -22,5 +22,19 @@ export class MediaController {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? 'INVALID_REQUEST');
     }
     await this.mediaService.download(parsed.data, res);
+  }
+
+  @Post('download/prepare')
+  prepareDownload(@Body() body: unknown) {
+    const parsed = downloadSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues[0]?.message ?? 'INVALID_REQUEST');
+    }
+    return this.mediaService.prepareDownload(parsed.data);
+  }
+
+  @Get('download/:token')
+  async downloadPrepared(@Param('token') token: string, @Res() res: Response): Promise<void> {
+    await this.mediaService.downloadPrepared(token, res);
   }
 }
