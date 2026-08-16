@@ -8,6 +8,8 @@ export interface DownloadParams {
   audioFormat?: AudioFormat;
 }
 
+export type DownloadState = 'idle' | 'preparing' | 'downloading' | 'success' | 'error';
+
 @Component({
   selector: 'app-media-details',
   standalone: true,
@@ -89,32 +91,43 @@ export interface DownloadParams {
             <button
               type="button"
               class="btn-primary"
+              [class.downloading]="downloadState === 'preparing' || downloadState === 'downloading'"
+              [class.success]="downloadState === 'success'"
               (click)="emitDownload('video')"
               [disabled]="!selectedQuality || downloading"
-              [attr.aria-label]="downloading ? 'Descargando...' : 'Descargar video'"
+              [attr.aria-label]="getDownloadAriaLabel('video')"
             >
-              <span *ngIf="downloading" class="spinner"></span>
-              <svg *ngIf="!downloading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <span *ngIf="downloadState === 'preparing'" class="spinner"></span>
+              <span *ngIf="downloadState === 'downloading'" class="spinner"></span>
+              <svg *ngIf="downloadState === 'success'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <svg *ngIf="downloadState === 'idle' || downloadState === 'error'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                 <polyline points="7 10 12 15 17 10"></polyline>
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
-              {{ downloading ? 'Descargando…' : 'Descargar video' }}
+              {{ getDownloadLabel('video') }}
             </button>
             <button
               type="button"
               class="btn-secondary"
+              [class.downloading]="downloadState === 'preparing' || downloadState === 'downloading'"
+              [class.success]="downloadState === 'success'"
               (click)="emitDownload('audio')"
               [disabled]="!selectedAudioFormat || downloading"
-              [attr.aria-label]="downloading ? 'Descargando...' : 'Descargar audio'"
+              [attr.aria-label]="getDownloadAriaLabel('audio')"
             >
-              <span *ngIf="downloading" class="spinner"></span>
-              <svg *ngIf="!downloading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <span *ngIf="downloadState === 'preparing' || downloadState === 'downloading'" class="spinner"></span>
+              <svg *ngIf="downloadState === 'success'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <svg *ngIf="downloadState === 'idle' || downloadState === 'error'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M9 18V5l12-2v13"></path>
                 <circle cx="6" cy="18" r="3"></circle>
                 <circle cx="18" cy="16" r="3"></circle>
               </svg>
-              {{ downloading ? 'Descargando…' : 'Descargar audio' }}
+              {{ getDownloadLabel('audio') }}
             </button>
           </div>
         </div>
@@ -309,6 +322,24 @@ export interface DownloadParams {
       flex: 1;
       min-width: 160px;
       height: 48px;
+      transition: all var(--transition-normal);
+    }
+
+    .download-actions .btn-primary.downloading,
+    .download-actions .btn-secondary.downloading {
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .download-actions .btn-primary.success {
+      background: var(--color-success);
+      border-color: var(--color-success);
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.3);
+    }
+
+    .download-actions .btn-secondary.success {
+      border-color: var(--color-success);
+      color: var(--color-success);
     }
 
     .spinner {
@@ -333,6 +364,7 @@ export interface DownloadParams {
 export class MediaDetailsComponent {
   @Input() media: MediaMetadata | null = null;
   @Input() downloading = false;
+  @Input() downloadState: DownloadState = 'idle';
   @Output() downloadRequest = new EventEmitter<DownloadParams>();
 
   selectedQuality: number | null = null;
@@ -359,6 +391,26 @@ export class MediaDetailsComponent {
       ...(type === 'video' && this.selectedQuality ? { quality: this.selectedQuality } : {}),
       ...(type === 'audio' && this.selectedAudioFormat ? { audioFormat: this.selectedAudioFormat } : {}),
     });
+  }
+
+  getDownloadLabel(type: DownloadType): string {
+    const label = type === 'video' ? 'video' : 'audio';
+    switch (this.downloadState) {
+      case 'preparing': return `Preparando ${label}…`;
+      case 'downloading': return `Descargando ${label}…`;
+      case 'success': return `${label === 'video' ? 'Video' : 'Audio'} listo`;
+      default: return type === 'video' ? 'Descargar video' : 'Descargar audio';
+    }
+  }
+
+  getDownloadAriaLabel(type: DownloadType): string {
+    const label = type === 'video' ? 'video' : 'audio';
+    switch (this.downloadState) {
+      case 'preparing': return `Preparando descarga de ${label}`;
+      case 'downloading': return `Descargando ${label}`;
+      case 'success': return `${label === 'video' ? 'Video' : 'Audio'} descargado`;
+      default: return `Descargar ${label}`;
+    }
   }
 
   formatDuration(totalSeconds: number): string {

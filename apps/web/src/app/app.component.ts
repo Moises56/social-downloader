@@ -3,7 +3,7 @@ import { Component } from '@angular/core';
 import type { MediaMetadata, AudioFormat } from '@social-downloader/contracts';
 import { environment } from '../environments/environment';
 import { UrlFormComponent } from './url-form.component';
-import { MediaDetailsComponent, DownloadParams } from './media-details.component';
+import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-details.component';
 
 @Component({
   selector: 'app-root',
@@ -66,6 +66,7 @@ import { MediaDetailsComponent, DownloadParams } from './media-details.component
           *ngIf="media && !loading"
           [media]="media"
           [downloading]="downloading"
+          [downloadState]="downloadState"
           (downloadRequest)="onDownload($event)"
         />
       </div>
@@ -305,6 +306,7 @@ export class AppComponent {
   media: MediaMetadata | null = null;
   loading = false;
   downloading = false;
+  downloadState: DownloadState = 'idle';
   error: string | null = null;
   errorAction: (() => void) | null = null;
   private lastUrl: string | null = null;
@@ -348,6 +350,7 @@ export class AppComponent {
     if (!item) return;
 
     this.downloading = true;
+    this.downloadState = 'preparing';
     this.error = null;
 
     const payload = {
@@ -373,16 +376,27 @@ export class AppComponent {
           throw new Error('No se recibió URL de descarga.');
         }
 
+        this.downloadState = 'downloading';
+
         const anchor = document.createElement('a');
         anchor.href = `${environment.apiBaseUrl}${data.downloadUrl}`;
         anchor.download = this.getSuggestedFilename(item.title, params.type, params.quality, params.audioFormat);
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
+
+        this.downloadState = 'success';
+        setTimeout(() => {
+          this.downloadState = 'idle';
+        }, 2000);
       })
       .catch((error) => {
         this.error = this.getErrorMessage(error);
+        this.downloadState = 'error';
         this.errorAction = null;
+        setTimeout(() => {
+          this.downloadState = 'idle';
+        }, 3000);
       })
       .finally(() => {
         this.downloading = false;
