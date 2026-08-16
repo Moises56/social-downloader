@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import { detectPlatform, type DownloadRequest, type MediaMetadata } from '../domain/media-platform';
 import { YtDlpMediaExtractor } from '../infrastructure/yt-dlp/yt-dlp-media-extractor';
+import { validateUrlNoSsrf } from './ssrf-guard';
 
 export const analyzeSchema = z.object({
   url: z.string().trim().url('INVALID_URL'),
@@ -34,7 +35,7 @@ export class MediaService {
   constructor(private readonly extractor: YtDlpMediaExtractor) {}
 
   async analyze(rawUrl: string, signal?: AbortSignal): Promise<MediaMetadata> {
-    const url = this.normalizeUrl(rawUrl);
+    const url = await validateUrlNoSsrf(rawUrl);
     const platform = detectPlatform(url.href);
     const metadata = await this.extractor.analyze(url, signal);
 
@@ -49,8 +50,8 @@ export class MediaService {
     await this.downloadWithStream(payload, res, req);
   }
 
-  prepareDownload(payload: DownloadRequest): { downloadUrl: string } {
-    const url = this.normalizeUrl(payload.url);
+  async prepareDownload(payload: DownloadRequest): Promise<{ downloadUrl: string }> {
+    const url = await validateUrlNoSsrf(payload.url);
     detectPlatform(url.href);
 
     this.purgeExpiredDownloadTokens();
@@ -71,7 +72,7 @@ export class MediaService {
   }
 
   private async downloadWithStream(payload: DownloadRequest, res: Response, req?: Request): Promise<void> {
-    const url = this.normalizeUrl(payload.url);
+    const url = await validateUrlNoSsrf(payload.url);
     const workDir = join(tmpdir(), 'social-downloader', randomUUID());
 
     const abortController = new AbortController();
@@ -167,18 +168,6 @@ export class MediaService {
       await rm(dir, { recursive: true, force: true });
     } catch {
       // noop
-    }
-  }
-
-  private normalizeUrl(rawUrl: string): URL {
-    try {
-      const url = new URL(rawUrl);
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        throw new BadRequestException('INVALID_URL');
-      }
-      return url;
-    } catch {
-      throw new BadRequestException('INVALID_URL');
     }
   }
 }

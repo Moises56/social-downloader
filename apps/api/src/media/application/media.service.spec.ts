@@ -2,7 +2,6 @@ import { InternalServerErrorException } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadRequest, DownloadResult, MediaMetadata } from '../domain/media-platform';
-import { MediaService } from './media.service';
 
 vi.mock('node:fs', () => ({
   createReadStream: vi.fn(),
@@ -13,8 +12,15 @@ vi.mock('node:fs/promises', () => ({
   rm: vi.fn(),
 }));
 
+vi.mock('./ssrf-guard', () => {
+  return {
+    validateUrlNoSsrf: (rawUrl: string) => Promise.resolve(new URL(rawUrl)),
+  };
+});
+
 import { createReadStream, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { MediaService } from './media.service';
 
 class FakeStream extends EventEmitter {
   destroyed = false;
@@ -151,7 +157,7 @@ describe('MediaService download cleanup', () => {
       size: 1234,
     });
 
-    const prepared = service.prepareDownload({
+    const prepared = await service.prepareDownload({
       url: 'https://youtube.com/shorts/demo',
       type: 'video',
       quality: 720,
