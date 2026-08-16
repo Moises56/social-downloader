@@ -1,10 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import type { MediaMetadata, AudioFormat } from '@social-downloader/contracts';
+import { environment } from '../environments/environment';
 import { UrlFormComponent } from './url-form.component';
 import { MediaDetailsComponent, DownloadParams } from './media-details.component';
-
-const API_BASE_URL = 'http://localhost:3005';
 
 @Component({
   selector: 'app-root',
@@ -57,7 +56,7 @@ export class AppComponent {
     this.error = null;
     this.media = null;
 
-    fetch(`${API_BASE_URL}/api/media/analyze`, {
+    fetch(`${environment.apiBaseUrl}/api/media/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -90,7 +89,7 @@ export class AppComponent {
       ...(params.audioFormat ? { audioFormat: params.audioFormat } : {}),
     };
 
-    fetch(`${API_BASE_URL}/api/media/download/prepare`, {
+    fetch(`${environment.apiBaseUrl}/api/media/download/prepare`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -107,7 +106,7 @@ export class AppComponent {
         }
 
         const anchor = document.createElement('a');
-        anchor.href = `${API_BASE_URL}${data.downloadUrl}`;
+        anchor.href = `${environment.apiBaseUrl}${data.downloadUrl}`;
         anchor.download = this.getSuggestedFilename(item.title, params.type, params.quality, params.audioFormat);
         document.body.appendChild(anchor);
         anchor.click();
