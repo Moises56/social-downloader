@@ -3,9 +3,17 @@
   "private": true,
   "packageManager": "pnpm@10.15.0",
   "scripts": {
+    "dev": "concurrently \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:api": "pnpm --filter @social-downloader/api start:dev",
     "dev:web": "pnpm --filter @social-downloader/web start",
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint"
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r exec prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^9.2.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

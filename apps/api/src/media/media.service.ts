@@ -2,7 +2,6 @@ import { BadGatewayException, Injectable } from '@nestjs/common';
 import type { Response } from 'express';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PlatformDetector } from './platform-detector';

@@ -11,5 +11,8 @@
         "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "web:build" } }
       }
     }
+  },
+  "cli": {
+    "analytics": "974293e3-9652-4709-8f64-c420f0d2e595"
   }
 }

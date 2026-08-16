@@ -1,29 +1,44 @@
 export type MediaPlatform = 'youtube' | 'tiktok' | 'instagram' | 'facebook' | 'x';
+export type DownloadType = 'video' | 'audio';
+export type AudioFormat = 'mp3' | 'm4a' | 'opus';
 
 export interface MediaFormat {
   id: string;
-  extension: string;
+  ext: string;
   resolution?: string;
-  height?: number;
   width?: number;
+  height?: number;
+  container?: string;
+  videoCodec?: string | null;
+  audioCodec?: string | null;
   filesize?: number;
-  videoCodec?: string;
-  audioCodec?: string;
+  formatNote?: string;
 }
 
 export interface MediaMetadata {
   platform: MediaPlatform;
   title: string;
-  author?: string;
-  duration?: number;
   thumbnail?: string;
+  duration?: number;
+  author?: string;
+  sourceUrl: string;
   formats: MediaFormat[];
 }
 
-export interface AnalyzeMediaRequest { url: string; }
+export interface AnalyzeMediaRequest {
+  url: string;
+}
+
+export interface AnalyzeMediaResponse extends MediaMetadata {}
+
 export interface DownloadMediaRequest {
   url: string;
-  kind: 'video' | 'audio';
+  type: DownloadType;
   quality?: number;
-  audioFormat?: 'mp3' | 'm4a' | 'opus';
+  audioFormat?: AudioFormat;
+}
+
+export interface ApiError {
+  code: string;
+  message: string;
 }

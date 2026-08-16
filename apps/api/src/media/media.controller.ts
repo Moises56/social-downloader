@@ -1,6 +1,6 @@
 import { Body, Controller, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsIn, IsInt, IsOptional, IsString, IsUrl, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsUrl, Max, Min } from 'class-validator';
 import { MediaService } from './media.service';
 
 class AnalyzeDto { @IsUrl({ require_protocol: true }) url!: string; }
