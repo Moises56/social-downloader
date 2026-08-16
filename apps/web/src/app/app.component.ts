@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, signal, computed } from '@angular/core';
 import type { MediaMetadata, AudioFormat } from '@social-downloader/contracts';
 import { environment } from '../environments/environment';
 import { UrlFormComponent } from './url-form.component';
@@ -22,23 +22,23 @@ import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-de
           </div>
         </header>
 
-        <app-url-form [loading]="loading" (analyze)="analyze($event)" />
+        <app-url-form [loading]="loading()" (analyze)="analyze($event)" />
 
-        <div *ngIf="error" class="error-banner fade-in" role="alert">
+        <div *ngIf="error()" class="error-banner fade-in" role="alert">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="error-icon">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
           <div class="error-content">
-            <p class="error-message">{{ error }}</p>
-            <button *ngIf="errorAction" type="button" class="error-retry" (click)="retry()">
+            <p class="error-message">{{ error() }}</p>
+            <button *ngIf="errorAction()" type="button" class="error-retry" (click)="retry()">
               Intentar nuevamente
             </button>
           </div>
         </div>
 
-        <div *ngIf="loading" class="skeleton-card fade-in">
+        <div *ngIf="loading()" class="skeleton-card fade-in">
           <div class="skeleton-layout">
             <div class="skeleton-thumb skeleton"></div>
             <div class="skeleton-info">
@@ -63,10 +63,10 @@ import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-de
         </div>
 
         <app-media-details
-          *ngIf="media && !loading"
-          [media]="media"
-          [downloading]="downloading"
-          [downloadState]="downloadState"
+          *ngIf="media() && !loading()"
+          [media]="media()!"
+          [downloading]="downloading()"
+          [downloadState]="downloadState()"
           (downloadRequest)="onDownload($event)"
         />
       </div>
@@ -218,7 +218,6 @@ import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-de
       border-radius: 4px;
     }
 
-    /* Skeleton */
     .skeleton-card {
       margin-top: 32px;
     }
@@ -303,20 +302,23 @@ import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-de
   `],
 })
 export class AppComponent {
-  media: MediaMetadata | null = null;
-  loading = false;
-  downloading = false;
-  downloadState: DownloadState = 'idle';
-  error: string | null = null;
-  errorAction: (() => void) | null = null;
-  private lastUrl: string | null = null;
+  readonly media = signal<MediaMetadata | null>(null);
+  readonly loading = signal(false);
+  readonly downloading = signal(false);
+  readonly downloadState = signal<DownloadState>('idle');
+  readonly error = signal<string | null>(null);
+  readonly errorAction = signal<(() => void) | null>(null);
+
+  private lastUrl = signal<string | null>(null);
+
+  readonly hasMedia = computed(() => this.media() !== null && !this.loading());
 
   analyze(url: string): void {
-    this.loading = true;
-    this.error = null;
-    this.errorAction = null;
-    this.media = null;
-    this.lastUrl = url;
+    this.loading.set(true);
+    this.error.set(null);
+    this.errorAction.set(null);
+    this.media.set(null);
+    this.lastUrl.set(url);
 
     fetch(`${environment.apiBaseUrl}/api/media/analyze`, {
       method: 'POST',
@@ -328,30 +330,31 @@ export class AppComponent {
           const errorBody = await response.json().catch(() => null);
           throw new Error(errorBody?.message ?? 'No se pudo analizar la URL.');
         }
-        this.media = await response.json() as MediaMetadata;
+        this.media.set(await response.json() as MediaMetadata);
       })
       .catch((error) => {
-        this.error = this.getErrorMessage(error);
-        this.errorAction = () => this.analyze(url);
+        this.error.set(this.getErrorMessage(error));
+        this.errorAction.set(() => this.analyze(url));
       })
       .finally(() => {
-        this.loading = false;
+        this.loading.set(false);
       });
   }
 
   retry(): void {
-    if (this.lastUrl) {
-      this.analyze(this.lastUrl);
+    const url = this.lastUrl();
+    if (url) {
+      this.analyze(url);
     }
   }
 
   onDownload(params: DownloadParams): void {
-    const item = this.media;
+    const item = this.media();
     if (!item) return;
 
-    this.downloading = true;
-    this.downloadState = 'preparing';
-    this.error = null;
+    this.downloading.set(true);
+    this.downloadState.set('preparing');
+    this.error.set(null);
 
     const payload = {
       url: item.sourceUrl,
@@ -376,7 +379,7 @@ export class AppComponent {
           throw new Error('No se recibió URL de descarga.');
         }
 
-        this.downloadState = 'downloading';
+        this.downloadState.set('downloading');
 
         const anchor = document.createElement('a');
         anchor.href = `${environment.apiBaseUrl}${data.downloadUrl}`;
@@ -385,21 +388,17 @@ export class AppComponent {
         anchor.click();
         anchor.remove();
 
-        this.downloadState = 'success';
-        setTimeout(() => {
-          this.downloadState = 'idle';
-        }, 2000);
+        this.downloadState.set('success');
+        setTimeout(() => this.downloadState.set('idle'), 2000);
       })
       .catch((error) => {
-        this.error = this.getErrorMessage(error);
-        this.downloadState = 'error';
-        this.errorAction = null;
-        setTimeout(() => {
-          this.downloadState = 'idle';
-        }, 3000);
+        this.error.set(this.getErrorMessage(error));
+        this.downloadState.set('error');
+        this.errorAction.set(null);
+        setTimeout(() => this.downloadState.set('idle'), 3000);
       })
       .finally(() => {
-        this.downloading = false;
+        this.downloading.set(false);
       });
   }
 

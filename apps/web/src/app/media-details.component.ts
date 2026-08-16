@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { MediaMetadata, DownloadType, AudioFormat } from '@social-downloader/contracts';
 
@@ -56,12 +56,12 @@ export type DownloadState = 'idle' | 'preparing' | 'downloading' | 'success' | '
               <h3 class="format-label">Video</h3>
               <div class="format-options">
                 <button
-                  *ngFor="let quality of videoQualities"
+                  *ngFor="let quality of videoQualities()"
                   type="button"
                   class="format-chip"
-                  [class.selected]="selectedQuality === quality"
-                  (click)="selectedQuality = quality"
-                  [attr.aria-pressed]="selectedQuality === quality"
+                  [class.selected]="selectedQuality() === quality"
+                  (click)="selectedQuality.set(quality)"
+                  [attr.aria-pressed]="selectedQuality() === quality"
                   [attr.aria-label]="'Calidad ' + quality + 'p'"
                 >
                   {{ quality }}p
@@ -76,9 +76,9 @@ export type DownloadState = 'idle' | 'preparing' | 'downloading' | 'success' | '
                   *ngFor="let format of audioFormats"
                   type="button"
                   class="format-chip"
-                  [class.selected]="selectedAudioFormat === format"
-                  (click)="selectedAudioFormat = format"
-                  [attr.aria-pressed]="selectedAudioFormat === format"
+                  [class.selected]="selectedAudioFormat() === format"
+                  (click)="selectedAudioFormat.set(format)"
+                  [attr.aria-pressed]="selectedAudioFormat() === format"
                   [attr.aria-label]="'Formato ' + format.toUpperCase()"
                 >
                   {{ format | uppercase }}
@@ -94,11 +94,10 @@ export type DownloadState = 'idle' | 'preparing' | 'downloading' | 'success' | '
               [class.downloading]="downloadState === 'preparing' || downloadState === 'downloading'"
               [class.success]="downloadState === 'success'"
               (click)="emitDownload('video')"
-              [disabled]="!selectedQuality || downloading"
+              [disabled]="!selectedQuality() || downloading"
               [attr.aria-label]="getDownloadAriaLabel('video')"
             >
-              <span *ngIf="downloadState === 'preparing'" class="spinner"></span>
-              <span *ngIf="downloadState === 'downloading'" class="spinner"></span>
+              <span *ngIf="downloadState === 'preparing' || downloadState === 'downloading'" class="spinner"></span>
               <svg *ngIf="downloadState === 'success'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12"></polyline>
               </svg>
@@ -115,7 +114,7 @@ export type DownloadState = 'idle' | 'preparing' | 'downloading' | 'success' | '
               [class.downloading]="downloadState === 'preparing' || downloadState === 'downloading'"
               [class.success]="downloadState === 'success'"
               (click)="emitDownload('audio')"
-              [disabled]="!selectedAudioFormat || downloading"
+              [disabled]="!selectedAudioFormat() || downloading"
               [attr.aria-label]="getDownloadAriaLabel('audio')"
             >
               <span *ngIf="downloadState === 'preparing' || downloadState === 'downloading'" class="spinner"></span>
@@ -367,10 +366,10 @@ export class MediaDetailsComponent {
   @Input() downloadState: DownloadState = 'idle';
   @Output() downloadRequest = new EventEmitter<DownloadParams>();
 
-  selectedQuality: number | null = null;
-  selectedAudioFormat: AudioFormat | null = null;
+  readonly selectedQuality = signal<number | null>(null);
+  readonly selectedAudioFormat = signal<AudioFormat | null>(null);
 
-  get videoQualities(): number[] {
+  readonly videoQualities = computed(() => {
     const formats = this.media?.formats ?? [];
     const heights = [...new Set(formats.map((format) => format.height).filter((value): value is number => typeof value === 'number'))]
       .filter((height) => height >= 144)
@@ -379,17 +378,15 @@ export class MediaDetailsComponent {
     const preferred = [2160, 1440, 1080, 720, 480, 360];
     const final = preferred.filter((value) => heights.includes(value));
     return final.length > 0 ? final : heights.slice(0, 6);
-  }
+  });
 
-  get audioFormats(): AudioFormat[] {
-    return ['mp3', 'm4a', 'opus'];
-  }
+  readonly audioFormats: AudioFormat[] = ['mp3', 'm4a', 'opus'];
 
   emitDownload(type: DownloadType): void {
     this.downloadRequest.emit({
       type,
-      ...(type === 'video' && this.selectedQuality ? { quality: this.selectedQuality } : {}),
-      ...(type === 'audio' && this.selectedAudioFormat ? { audioFormat: this.selectedAudioFormat } : {}),
+      ...(type === 'video' && this.selectedQuality() ? { quality: this.selectedQuality()! } : {}),
+      ...(type === 'audio' && this.selectedAudioFormat() ? { audioFormat: this.selectedAudioFormat()! } : {}),
     });
   }
 
