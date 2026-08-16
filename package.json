@@ -1,0 +1,11 @@
+{
+  "name": "social-downloader",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @social-downloader/api start:dev",
+    "dev:web": "pnpm --filter @social-downloader/web start",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  }
+}

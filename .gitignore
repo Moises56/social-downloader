@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.angular/
+.env
+.env.*
+!.env.example
+temp/
+.DS_Store
+coverage/
