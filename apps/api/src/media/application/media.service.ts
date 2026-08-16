@@ -145,11 +145,13 @@ export class MediaService {
       res.once('finish', cleanupAndIgnore);
 
       stream.pipe(res);
-    } catch {
+    } catch (error) {
       if (req) {
         req.socket.removeListener('close', onClientClose);
       }
       await this.cleanup(workDir);
+      const message = error instanceof Error ? error.message : 'DOWNLOAD_FAILED';
+      console.error('[MediaService] download failed:', message);
       throw new InternalServerErrorException('DOWNLOAD_FAILED');
     } finally {
       this.downloadSemaphore.release();

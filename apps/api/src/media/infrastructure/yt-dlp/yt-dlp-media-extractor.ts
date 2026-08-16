@@ -1,6 +1,6 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
-import { access, mkdir, rm, stat } from 'node:fs/promises';
+import { access, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { detectPlatform, type DownloadRequest, type DownloadResult, type MediaMetadata } from '../../domain/media-platform';
@@ -56,9 +56,23 @@ export class YtDlpMediaExtractor {
     args.push('--print', 'after_move:filepath', safeUrl.href);
 
     const stdout = await this.runYtDlp(args, Number(process.env.DOWNLOAD_TIMEOUT_MS ?? 900000), 'download', signal);
-    const filepath = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+    let filepath = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+
     if (!filepath) {
       throw new BadGatewayException('DOWNLOAD_FAILED');
+    }
+
+    // Fallback: if the printed path doesn't exist, try to find the file in workDir
+    try {
+      await access(filepath);
+    } catch {
+      const files = await readdir(baseDir).catch(() => []);
+      const mediaFile = files.find((f) => /\.(mp4|mp3|m4a|opus|webm|mkv|avi)$/i.test(f));
+      if (mediaFile) {
+        filepath = join(baseDir, mediaFile);
+      } else {
+        throw new BadGatewayException('DOWNLOAD_FAILED');
+      }
     }
 
     try {
@@ -189,6 +203,7 @@ export class YtDlpMediaExtractor {
             resolve(stdout);
             return;
           }
+          console.error(`[YtDlp] exited with code ${code}. stderr:`, stderr.slice(0, 500));
           safeReject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
         });
       };
