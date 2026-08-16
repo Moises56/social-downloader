@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { detectPlatform, type DownloadRequest, type DownloadResult, type MediaMetadata } from '../../domain/media-platform';
 import { ensurePublicUrl } from '../ssrf/url-safety';
+import { resolveMimeTypeFromFilename } from './mime-type';
 
 type YtDlpCommand = {
   command: string;
@@ -63,7 +64,7 @@ export class YtDlpMediaExtractor {
     try {
       await access(filepath);
       const filename = filepath.split('/').at(-1) ?? 'download';
-      const contentType = request.type === 'audio' ? 'audio/mpeg' : 'video/mp4';
+      const contentType = resolveMimeTypeFromFilename(filename);
       const { size } = await stat(filepath);
       return { filePath: filepath, fileName: filename, contentType, size };
     } catch {
