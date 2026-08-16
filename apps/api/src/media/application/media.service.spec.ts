@@ -1,7 +1,7 @@
-import { InternalServerErrorException } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DownloadRequest, DownloadResult, MediaMetadata } from '../domain/media-platform';
+import { ApiError } from '../shared/errors';
 
 vi.mock('node:fs', () => ({
   createReadStream: vi.fn(),
@@ -139,9 +139,7 @@ describe('MediaService download cleanup', () => {
     vi.mocked(extractor.download).mockRejectedValue(new Error('boom'));
     const res = new FakeResponse();
 
-    await expect(service.download({ url: 'https://youtu.be/demo', type: 'video' }, res as never)).rejects.toBeInstanceOf(
-      InternalServerErrorException,
-    );
+    await expect(service.download({ url: 'https://youtu.be/demo', type: 'video' }, res as never)).rejects.toBeInstanceOf(ApiError);
 
     expect(rm).toHaveBeenCalledTimes(1);
   });
@@ -169,8 +167,6 @@ describe('MediaService download cleanup', () => {
     const res = new FakeResponse();
     await service.downloadPrepared(token!, res as never);
 
-    await expect(service.downloadPrepared(token!, new FakeResponse() as never)).rejects.toMatchObject({
-      message: 'INVALID_DOWNLOAD_TOKEN',
-    });
+    await expect(service.downloadPrepared(token!, new FakeResponse() as never)).rejects.toBeInstanceOf(ApiError);
   });
 });

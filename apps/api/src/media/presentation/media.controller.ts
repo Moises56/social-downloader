@@ -1,6 +1,7 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { analyzeSchema, downloadSchema, MediaService } from '../application/media.service';
+import { ApiError } from '../shared/errors';
 
 @Controller('media')
 export class MediaController {
@@ -10,7 +11,7 @@ export class MediaController {
   async analyze(@Body() body: unknown) {
     const parsed = analyzeSchema.safeParse(body);
     if (!parsed.success) {
-      throw new BadRequestException(parsed.error.issues[0]?.message ?? 'INVALID_URL');
+      throw new ApiError('INVALID_URL', parsed.error.issues[0]?.message);
     }
     return this.mediaService.analyze(parsed.data.url);
   }
@@ -19,7 +20,7 @@ export class MediaController {
   async download(@Body() body: unknown, @Res() res: Response, @Req() req: Request): Promise<void> {
     const parsed = downloadSchema.safeParse(body);
     if (!parsed.success) {
-      throw new BadRequestException(parsed.error.issues[0]?.message ?? 'INVALID_REQUEST');
+      throw new ApiError('INVALID_URL', parsed.error.issues[0]?.message);
     }
     await this.mediaService.download(parsed.data, res, req);
   }
@@ -28,7 +29,7 @@ export class MediaController {
   prepareDownload(@Body() body: unknown) {
     const parsed = downloadSchema.safeParse(body);
     if (!parsed.success) {
-      throw new BadRequestException(parsed.error.issues[0]?.message ?? 'INVALID_REQUEST');
+      throw new ApiError('INVALID_URL', parsed.error.issues[0]?.message);
     }
     return this.mediaService.prepareDownload(parsed.data);
   }

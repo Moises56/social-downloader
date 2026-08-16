@@ -1,4 +1,4 @@
-import { BadGatewayException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { access, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { detectPlatform, type DownloadRequest, type DownloadResult, type MediaMetadata } from '../../domain/media-platform';
 import { ensurePublicUrl } from '../ssrf/url-safety';
 import { resolveMimeTypeFromFilename } from './mime-type';
+import { ApiError, mapYtDlpError } from '../../shared/errors';
 
 type YtDlpCommand = {
   command: string;
@@ -59,7 +60,7 @@ export class YtDlpMediaExtractor {
     let filepath = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
 
     if (!filepath) {
-      throw new BadGatewayException('DOWNLOAD_FAILED');
+      throw new ApiError('DOWNLOAD_FAILED');
     }
 
     // Fallback: if the printed path doesn't exist, try to find the file in workDir
@@ -71,7 +72,7 @@ export class YtDlpMediaExtractor {
       if (mediaFile) {
         filepath = join(baseDir, mediaFile);
       } else {
-        throw new BadGatewayException('DOWNLOAD_FAILED');
+        throw new ApiError('DOWNLOAD_FAILED');
       }
     }
 
@@ -83,7 +84,7 @@ export class YtDlpMediaExtractor {
       return { filePath: filepath, fileName: filename, contentType, size };
     } catch {
       await rm(baseDir, { recursive: true, force: true });
-      throw new BadGatewayException('DOWNLOAD_FAILED');
+      throw new ApiError('DOWNLOAD_FAILED');
     }
   }
 
@@ -134,7 +135,7 @@ export class YtDlpMediaExtractor {
         const candidate = candidates[index];
         if (!candidate) {
           safeReject(
-            new BadGatewayException('YTDLP_ERROR: yt-dlp no disponible. Instala yt-dlp o define YTDLP_BINARY.'),
+            new ApiError('YTDLP_NOT_AVAILABLE'),
           );
           return;
         }
@@ -162,20 +163,20 @@ export class YtDlpMediaExtractor {
 
         const timer = setTimeout(() => {
           killWithGrace();
-          safeReject(new BadGatewayException(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
+          safeReject(new ApiError(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
         }, timeoutMs);
 
         const onAbort = (): void => {
           clearTimeout(timer);
           killWithGrace();
-          safeReject(new BadGatewayException('DOWNLOAD_CANCELLED'));
+          safeReject(new ApiError('DOWNLOAD_CANCELLED'));
         };
 
         if (signal) {
           if (signal.aborted) {
             clearTimeout(timer);
             killWithGrace();
-            safeReject(new BadGatewayException('DOWNLOAD_CANCELLED'));
+            safeReject(new ApiError('DOWNLOAD_CANCELLED'));
             return;
           }
           signal.addEventListener('abort', onAbort, { once: true });
@@ -194,7 +195,7 @@ export class YtDlpMediaExtractor {
             executeCandidate(index + 1);
             return;
           }
-          safeReject(new BadGatewayException(`YTDLP_ERROR: ${String(error.message)}`));
+          safeReject(new ApiError('YTDLP_NOT_AVAILABLE', String(error.message)));
         });
         child.once('close', (code) => {
           clearTimeout(timer);
@@ -204,7 +205,7 @@ export class YtDlpMediaExtractor {
             return;
           }
           console.error(`[YtDlp] exited with code ${code}. stderr:`, stderr.slice(0, 500));
-          safeReject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
+          safeReject(new ApiError(mapYtDlpError(stderr)));
         });
       };
 

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../shared/errors';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -99,7 +100,8 @@ describe('YtDlpMediaExtractor', () => {
     await new Promise<void>((r) => setImmediate(r));
 
     const result = await downloadPromise;
-    expect(result).toMatchObject({ message: 'DOWNLOAD_CANCELLED' });
+    expect(result).toBeInstanceOf(ApiError);
+    expect((result as ApiError).code).toBe('DOWNLOAD_CANCELLED');
   });
 
   it('usa SIGKILL despues del grace period si el proceso no termina', async () => {
@@ -129,7 +131,8 @@ describe('YtDlpMediaExtractor', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       const result = await downloadPromise;
-      expect(result).toMatchObject({ message: 'DOWNLOAD_CANCELLED' });
+      expect(result).toBeInstanceOf(ApiError);
+      expect((result as ApiError).code).toBe('DOWNLOAD_CANCELLED');
     } finally {
       vi.useRealTimers();
     }
@@ -205,7 +208,8 @@ describe('YtDlpMediaExtractor', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       const result = await downloadPromise;
-      expect(result).toMatchObject({ message: 'DOWNLOAD_TIMEOUT' });
+      expect(result).toBeInstanceOf(ApiError);
+      expect((result as ApiError).code).toBe('DOWNLOAD_TIMEOUT');
     } finally {
       vi.useRealTimers();
     }

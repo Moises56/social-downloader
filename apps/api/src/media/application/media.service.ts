@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import { detectPlatform, type DownloadRequest, type MediaMetadata } from '../dom
 import { YtDlpMediaExtractor } from '../infrastructure/yt-dlp/yt-dlp-media-extractor';
 import { validateUrlNoSsrf } from './ssrf-guard';
 import { Semaphore } from './semaphore';
+import { ApiError } from '../shared/errors';
 
 export const analyzeSchema = z.object({
   url: z.string().trim().url('INVALID_URL'),
@@ -43,12 +44,12 @@ export class MediaService {
     const metadata = await this.extractor.analyze(url, signal);
 
     if (platform !== metadata.platform) {
-      throw new BadRequestException('UNSUPPORTED_PLATFORM');
+      throw new ApiError('UNSUPPORTED_PLATFORM');
     }
 
     const maxFormatSize = Math.max(...metadata.formats.map((f) => f.filesize ?? 0));
     if (maxFormatSize > 0 && maxFormatSize > MAX_DOWNLOAD_SIZE_BYTES) {
-      throw new BadRequestException('DOWNLOAD_TOO_LARGE');
+      throw new ApiError('DOWNLOAD_TOO_LARGE');
     }
 
     return metadata;
@@ -101,7 +102,7 @@ export class MediaService {
 
       if (size > MAX_DOWNLOAD_SIZE_BYTES) {
         await this.cleanup(workDir);
-        throw new BadRequestException('DOWNLOAD_TOO_LARGE');
+        throw new ApiError('DOWNLOAD_TOO_LARGE');
       }
 
       const stream = createReadStream(file.filePath);
@@ -150,9 +151,8 @@ export class MediaService {
         req.socket.removeListener('close', onClientClose);
       }
       await this.cleanup(workDir);
-      const message = error instanceof Error ? error.message : 'DOWNLOAD_FAILED';
-      console.error('[MediaService] download failed:', message);
-      throw new InternalServerErrorException('DOWNLOAD_FAILED');
+      console.error('[MediaService] download failed:', error instanceof Error ? error.message : error);
+      throw error instanceof ApiError ? error : new ApiError('DOWNLOAD_FAILED');
     } finally {
       this.downloadSemaphore.release();
     }
@@ -163,12 +163,12 @@ export class MediaService {
 
     const prepared = this.preparedDownloads.get(token);
     if (!prepared) {
-      throw new BadRequestException('INVALID_DOWNLOAD_TOKEN');
+      throw new ApiError('INVALID_DOWNLOAD_TOKEN');
     }
 
     this.preparedDownloads.delete(token);
     if (prepared.expiresAt < Date.now()) {
-      throw new BadRequestException('INVALID_DOWNLOAD_TOKEN');
+      throw new ApiError('INVALID_DOWNLOAD_TOKEN');
     }
 
     return prepared;
