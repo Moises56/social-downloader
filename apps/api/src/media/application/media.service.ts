@@ -27,6 +27,7 @@ type PreparedDownload = {
 };
 
 const DOWNLOAD_TOKEN_TTL_MS = 2 * 60 * 1000;
+const MAX_DOWNLOAD_SIZE_BYTES = (Number(process.env.MAX_DOWNLOAD_SIZE_MB) || 2048) * 1024 * 1024;
 
 @Injectable()
 export class MediaService {
@@ -41,6 +42,11 @@ export class MediaService {
 
     if (platform !== metadata.platform) {
       throw new BadRequestException('UNSUPPORTED_PLATFORM');
+    }
+
+    const maxFormatSize = Math.max(...metadata.formats.map((f) => f.filesize ?? 0));
+    if (maxFormatSize > 0 && maxFormatSize > MAX_DOWNLOAD_SIZE_BYTES) {
+      throw new BadRequestException('DOWNLOAD_TOO_LARGE');
     }
 
     return metadata;
@@ -89,6 +95,12 @@ export class MediaService {
     try {
       const file = await this.extractor.download({ ...payload, url: url.href }, workDir, abortController.signal);
       const size = statSync(file.filePath).size;
+
+      if (size > MAX_DOWNLOAD_SIZE_BYTES) {
+        await this.cleanup(workDir);
+        throw new BadRequestException('DOWNLOAD_TOO_LARGE');
+      }
+
       const stream = createReadStream(file.filePath);
 
       const cleanupOnce = async (): Promise<void> => {
