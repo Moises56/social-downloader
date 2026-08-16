@@ -6,8 +6,19 @@ import { randomUUID } from 'node:crypto';
 import { detectPlatform, type DownloadRequest, type DownloadResult, type MediaMetadata } from '../../domain/media-platform';
 import { ensurePublicUrl } from '../ssrf/url-safety';
 
+type YtDlpCommand = {
+  command: string;
+  baseArgs: string[];
+};
+
 @Injectable()
 export class YtDlpMediaExtractor {
+  private readonly commandCandidates: YtDlpCommand[];
+
+  constructor() {
+    this.commandCandidates = this.resolveCandidates();
+  }
+
   async analyze(url: URL): Promise<MediaMetadata> {
     const safe = await ensurePublicUrl(url.href);
     const args = ['--dump-single-json', '--skip-download', '--no-playlist', safe.href];
@@ -93,31 +104,71 @@ export class YtDlpMediaExtractor {
   }
 
   private runYtDlp(args: string[], timeoutMs: number, operation: 'analysis' | 'download'): Promise<string> {
+    const candidates = this.commandCandidates.length > 0 ? this.commandCandidates : this.resolveCandidates();
+
     return new Promise((resolve, reject) => {
-      const binary = process.env.YTDLP_BINARY ?? 'yt-dlp';
-      const child = spawn(binary, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-      let stdout = '';
-      let stderr = '';
-
-      const timer = setTimeout(() => {
-        child.kill('SIGTERM');
-        reject(new BadGatewayException(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
-      }, timeoutMs);
-
-      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-      child.once('error', (error) => {
-        clearTimeout(timer);
-        reject(new BadGatewayException(`YTDLP_ERROR: ${String(error.message)}`));
-      });
-      child.once('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) {
-          resolve(stdout);
+      const executeCandidate = (index: number): void => {
+        const candidate = candidates[index];
+        if (!candidate) {
+          reject(
+            new BadGatewayException('YTDLP_ERROR: yt-dlp no disponible. Instala yt-dlp o define YTDLP_BINARY.'),
+          );
           return;
         }
-        reject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
-      });
+
+        const child = spawn(candidate.command, [...candidate.baseArgs, ...args], {
+          shell: false,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+
+        const timer = setTimeout(() => {
+          child.kill('SIGTERM');
+          reject(new BadGatewayException(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
+        }, timeoutMs);
+
+        child.stdout.on('data', (chunk: Buffer) => {
+          stdout += chunk.toString();
+        });
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+        });
+        child.once('error', (error) => {
+          clearTimeout(timer);
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            executeCandidate(index + 1);
+            return;
+          }
+          reject(new BadGatewayException(`YTDLP_ERROR: ${String(error.message)}`));
+        });
+        child.once('close', (code) => {
+          clearTimeout(timer);
+          if (code === 0) {
+            resolve(stdout);
+            return;
+          }
+          reject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
+        });
+      };
+
+      executeCandidate(0);
     });
+  }
+
+  private resolveCandidates(): YtDlpCommand[] {
+    const candidates: YtDlpCommand[] = [];
+
+    if (process.env.YTDLP_BINARY?.trim()) {
+      candidates.push({ command: process.env.YTDLP_BINARY.trim(), baseArgs: [] });
+    }
+
+    candidates.push(
+      { command: 'yt-dlp', baseArgs: [] },
+      { command: 'python3', baseArgs: ['-m', 'yt_dlp'] },
+      { command: 'python', baseArgs: ['-m', 'yt_dlp'] },
+    );
+
+    return candidates;
   }
 }

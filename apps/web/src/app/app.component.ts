@@ -1,6 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component } from '@angular/core';
 
 const API_BASE_URL = 'http://localhost:3005';
 
@@ -161,8 +160,6 @@ type MediaMetadata = {
   `,
 })
 export class AppComponent {
-  private readonly http = inject(HttpClient);
-
   url = '';
   media: MediaMetadata | null = null;
   loading = false;
@@ -202,18 +199,28 @@ export class AppComponent {
     this.error = null;
     this.media = null;
 
-    this.http.post<MediaMetadata>(`${API_BASE_URL}/api/media/analyze`, { url: value }).subscribe({
-      next: (data) => {
+    fetch(`${API_BASE_URL}/api/media/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: value }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          throw new Error(errorBody?.message ?? 'No se pudo analizar la URL.');
+        }
+
+        const data = (await response.json()) as MediaMetadata;
         this.media = data;
         this.selectedQuality = this.videoQualities[0] ?? null;
         this.selectedAudioFormat = this.audioFormats[0] ?? null;
+      })
+      .catch((error) => {
+        this.error = error instanceof Error ? error.message : 'No se pudo analizar la URL.';
+      })
+      .finally(() => {
         this.loading = false;
-      },
-      error: (err) => {
-        this.error = err?.error?.message ?? 'No se pudo analizar la URL.';
-        this.loading = false;
-      },
-    });
+      });
   }
 
   download(type: 'video' | 'audio'): void {
