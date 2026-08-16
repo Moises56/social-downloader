@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "ng serve --host 0.0.0.0 --port 4200",
+    "start": "ng serve --host 0.0.0.0 --port 4205",
     "build": "ng build",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude tests/**",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@angular/common": "^20.2.0",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@angular/build": "^20.2.0",
     "@angular/cli": "^20.2.0",
+    "@playwright/test": "^1.55.0",
     "@types/node": "^24.3.0",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

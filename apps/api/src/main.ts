@@ -1,7 +1,23 @@
+import 'dotenv/config';
+import { existsSync } from 'node:fs';
+import * as path from 'node:path';
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '../.env'),
+  path.resolve(process.cwd(), '../../.env'),
+  path.resolve(__dirname, '../.env'),
+  path.resolve(__dirname, '../../.env'),
+];
+
+const envPath = envCandidates.find((candidate) => existsSync(candidate));
+if (envPath) {
+  import('dotenv').then((dotenv) => dotenv.config({ path: envPath })).catch(() => undefined);
+}
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
