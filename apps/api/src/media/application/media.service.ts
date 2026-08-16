@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { createReadStream, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -33,10 +33,10 @@ export class MediaService {
 
   constructor(private readonly extractor: YtDlpMediaExtractor) {}
 
-  async analyze(rawUrl: string): Promise<MediaMetadata> {
+  async analyze(rawUrl: string, signal?: AbortSignal): Promise<MediaMetadata> {
     const url = this.normalizeUrl(rawUrl);
     const platform = detectPlatform(url.href);
-    const metadata = await this.extractor.analyze(url);
+    const metadata = await this.extractor.analyze(url, signal);
 
     if (platform !== metadata.platform) {
       throw new BadRequestException('UNSUPPORTED_PLATFORM');
@@ -45,8 +45,8 @@ export class MediaService {
     return metadata;
   }
 
-  async download(payload: DownloadRequest, res: Response): Promise<void> {
-    await this.downloadWithStream(payload, res);
+  async download(payload: DownloadRequest, res: Response, req?: Request): Promise<void> {
+    await this.downloadWithStream(payload, res, req);
   }
 
   prepareDownload(payload: DownloadRequest): { downloadUrl: string } {
@@ -65,24 +65,37 @@ export class MediaService {
     };
   }
 
-  async downloadPrepared(token: string, res: Response): Promise<void> {
+  async downloadPrepared(token: string, res: Response, req?: Request): Promise<void> {
     const prepared = this.consumePreparedDownload(token);
-    await this.downloadWithStream(prepared.request, res);
+    await this.downloadWithStream(prepared.request, res, req);
   }
 
-  private async downloadWithStream(payload: DownloadRequest, res: Response): Promise<void> {
+  private async downloadWithStream(payload: DownloadRequest, res: Response, req?: Request): Promise<void> {
     const url = this.normalizeUrl(payload.url);
     const workDir = join(tmpdir(), 'social-downloader', randomUUID());
 
+    const abortController = new AbortController();
+    let cleaned = false;
+
+    const onClientClose = (): void => {
+      abortController.abort();
+    };
+
+    if (req) {
+      req.socket.on('close', onClientClose);
+    }
+
     try {
-      const file = await this.extractor.download({ ...payload, url: url.href }, workDir);
+      const file = await this.extractor.download({ ...payload, url: url.href }, workDir, abortController.signal);
       const size = statSync(file.filePath).size;
       const stream = createReadStream(file.filePath);
-      let cleaned = false;
 
       const cleanupOnce = async (): Promise<void> => {
         if (cleaned) return;
         cleaned = true;
+        if (req) {
+          req.socket.removeListener('close', onClientClose);
+        }
         await this.cleanup(workDir);
       };
 
@@ -117,6 +130,9 @@ export class MediaService {
 
       stream.pipe(res);
     } catch {
+      if (req) {
+        req.socket.removeListener('close', onClientClose);
+      }
       await this.cleanup(workDir);
       throw new InternalServerErrorException('DOWNLOAD_FAILED');
     }

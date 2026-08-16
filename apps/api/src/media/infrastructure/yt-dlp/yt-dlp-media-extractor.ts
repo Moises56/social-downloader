@@ -20,10 +20,10 @@ export class YtDlpMediaExtractor {
     this.commandCandidates = this.resolveCandidates();
   }
 
-  async analyze(url: URL): Promise<MediaMetadata> {
+  async analyze(url: URL, signal?: AbortSignal): Promise<MediaMetadata> {
     const safe = await ensurePublicUrl(url.href);
     const args = ['--dump-single-json', '--skip-download', '--no-playlist', safe.href];
-    const stdout = await this.runYtDlp(args, Number(process.env.ANALYSIS_TIMEOUT_MS ?? 30000), 'analysis');
+    const stdout = await this.runYtDlp(args, Number(process.env.ANALYSIS_TIMEOUT_MS ?? 30000), 'analysis', signal);
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
 
     return {
@@ -37,7 +37,7 @@ export class YtDlpMediaExtractor {
     };
   }
 
-  async download(request: DownloadRequest, workDir?: string): Promise<DownloadResult> {
+  async download(request: DownloadRequest, workDir?: string, signal?: AbortSignal): Promise<DownloadResult> {
     const safeUrl = await ensurePublicUrl(request.url);
     const baseDir = workDir ?? join(process.cwd(), 'temp', randomUUID());
     await mkdir(baseDir, { recursive: true });
@@ -55,7 +55,7 @@ export class YtDlpMediaExtractor {
 
     args.push('--print', 'after_move:filepath', safeUrl.href);
 
-    const stdout = await this.runYtDlp(args, Number(process.env.DOWNLOAD_TIMEOUT_MS ?? 900000), 'download');
+    const stdout = await this.runYtDlp(args, Number(process.env.DOWNLOAD_TIMEOUT_MS ?? 900000), 'download', signal);
     const filepath = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
     if (!filepath) {
       throw new BadGatewayException('DOWNLOAD_FAILED');
@@ -104,14 +104,22 @@ export class YtDlpMediaExtractor {
       .slice(0, 30);
   }
 
-  private runYtDlp(args: string[], timeoutMs: number, operation: 'analysis' | 'download'): Promise<string> {
+  private runYtDlp(args: string[], timeoutMs: number, operation: 'analysis' | 'download', signal?: AbortSignal): Promise<string> {
     const candidates = this.commandCandidates.length > 0 ? this.commandCandidates : this.resolveCandidates();
+    const GRACE_MS = 3000;
 
     return new Promise((resolve, reject) => {
+      let rejected = false;
+      const safeReject = (error: unknown): void => {
+        if (rejected) return;
+        rejected = true;
+        reject(error);
+      };
+
       const executeCandidate = (index: number): void => {
         const candidate = candidates[index];
         if (!candidate) {
-          reject(
+          safeReject(
             new BadGatewayException('YTDLP_ERROR: yt-dlp no disponible. Instala yt-dlp o define YTDLP_BINARY.'),
           );
           return;
@@ -124,10 +132,40 @@ export class YtDlpMediaExtractor {
         let stdout = '';
         let stderr = '';
 
+        let termSent = false;
+
+        const killWithGrace = (): void => {
+          if (child.exitCode !== null) return;
+          if (!termSent) {
+            termSent = true;
+            child.kill('SIGTERM');
+            setTimeout(() => {
+              if (child.exitCode !== null) return;
+              child.kill('SIGKILL');
+            }, GRACE_MS);
+          }
+        };
+
         const timer = setTimeout(() => {
-          child.kill('SIGTERM');
-          reject(new BadGatewayException(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
+          killWithGrace();
+          safeReject(new BadGatewayException(operation === 'analysis' ? 'ANALYSIS_TIMEOUT' : 'DOWNLOAD_TIMEOUT'));
         }, timeoutMs);
+
+        const onAbort = (): void => {
+          clearTimeout(timer);
+          killWithGrace();
+          safeReject(new BadGatewayException('DOWNLOAD_CANCELLED'));
+        };
+
+        if (signal) {
+          if (signal.aborted) {
+            clearTimeout(timer);
+            killWithGrace();
+            safeReject(new BadGatewayException('DOWNLOAD_CANCELLED'));
+            return;
+          }
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
 
         child.stdout.on('data', (chunk: Buffer) => {
           stdout += chunk.toString();
@@ -137,19 +175,21 @@ export class YtDlpMediaExtractor {
         });
         child.once('error', (error) => {
           clearTimeout(timer);
+          signal?.removeEventListener('abort', onAbort);
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
             executeCandidate(index + 1);
             return;
           }
-          reject(new BadGatewayException(`YTDLP_ERROR: ${String(error.message)}`));
+          safeReject(new BadGatewayException(`YTDLP_ERROR: ${String(error.message)}`));
         });
         child.once('close', (code) => {
           clearTimeout(timer);
+          signal?.removeEventListener('abort', onAbort);
           if (code === 0) {
             resolve(stdout);
             return;
           }
-          reject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
+          safeReject(new BadGatewayException(stderr || 'MEDIA_NOT_AVAILABLE'));
         });
       };
 
