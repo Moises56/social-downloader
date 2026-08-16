@@ -43,13 +43,45 @@ export class MediaService {
     try {
       const file = await this.extractor.download({ ...payload, url: url.href }, workDir);
       const size = statSync(file.filePath).size;
+      const stream = createReadStream(file.filePath);
+      let cleaned = false;
+
+      const cleanupOnce = async (): Promise<void> => {
+        if (cleaned) return;
+        cleaned = true;
+        await this.cleanup(workDir);
+      };
+
+      const cleanupAndIgnore = (): void => {
+        void cleanupOnce();
+      };
 
       res.setHeader('Content-Type', file.contentType);
       res.setHeader('Content-Length', String(size));
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.fileName)}"`);
       res.setHeader('Cache-Control', 'no-store');
 
-      createReadStream(file.filePath).pipe(res);
+      stream.once('error', () => {
+        cleanupAndIgnore();
+        if (!res.headersSent) {
+          res.status(500).json({ code: 'DOWNLOAD_FAILED', message: 'No se pudo completar la descarga.' });
+          return;
+        }
+        res.destroy();
+      });
+
+      stream.once('close', cleanupAndIgnore);
+
+      res.once('close', () => {
+        if (!stream.destroyed) {
+          stream.destroy();
+        }
+        cleanupAndIgnore();
+      });
+
+      res.once('finish', cleanupAndIgnore);
+
+      stream.pipe(res);
     } catch {
       await this.cleanup(workDir);
       throw new InternalServerErrorException('DOWNLOAD_FAILED');
