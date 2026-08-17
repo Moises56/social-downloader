@@ -1,4 +1,4 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, effect } from '@angular/core';
 import type {
   BrandPreset,
   VideoComposition,
@@ -21,6 +21,25 @@ export interface StudioAsset {
   height?: number;
 }
 
+interface AutosaveData {
+  compositionId: string | null;
+  sourceAssetId: string | null;
+  sourceFileName: string | null;
+  brandPresetId: string | null;
+  exportPresetId: string | null;
+  videoFitMode: VideoFitMode;
+  videoFitBackgroundColor: string;
+  textOverlays: TextOverlay[];
+  audioTracks: AudioTrack[];
+  keepOriginalAudio: boolean;
+  originalAudioVolume: number;
+  showSafeZones: boolean;
+  savedAt: number;
+}
+
+const AUTOSAVE_KEY = 'studio-autosave';
+const AUTOSAVE_TTL = 30 * 60 * 1000;
+
 @Injectable({ providedIn: 'root' })
 export class StudioStore {
   readonly sourceAsset = signal<StudioAsset | null>(null);
@@ -39,6 +58,8 @@ export class StudioStore {
   readonly selectedExportPreset = signal<ExportPreset | null>(null);
   readonly videoFitMode = signal<VideoFitMode>('crop');
   readonly videoFitBackgroundColor = signal<string>('#000000');
+
+  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
@@ -109,6 +130,20 @@ export class StudioStore {
     mode: this.videoFitMode(),
     backgroundColor: this.videoFitBackgroundColor(),
   }));
+
+  constructor() {
+    effect(() => {
+      const _source = this.sourceAsset();
+      const _overlays = this.textOverlays();
+      const _audio = this.audioTracks();
+      const _composition = this.composition();
+
+      if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = setTimeout(() => {
+        this.saveToLocalStorage();
+      }, 1000);
+    });
+  }
 
   setSource(asset: StudioAsset, videoUrl?: string): void {
     this.sourceAsset.set(asset);
@@ -188,8 +223,63 @@ export class StudioStore {
     this.audioTracks.set(preset.audioTracks.map((a) => ({ ...a })));
   }
 
+  private saveToLocalStorage(): void {
+    const data: AutosaveData = {
+      compositionId: this.composition()?.id ?? null,
+      sourceAssetId: this.sourceAsset()?.id ?? null,
+      sourceFileName: this.sourceAsset()?.fileName ?? null,
+      brandPresetId: this.selectedPreset()?.id ?? null,
+      exportPresetId: this.selectedExportPreset()?.id ?? null,
+      videoFitMode: this.videoFitMode(),
+      videoFitBackgroundColor: this.videoFitBackgroundColor(),
+      textOverlays: this.textOverlays(),
+      audioTracks: this.audioTracks(),
+      keepOriginalAudio: true,
+      originalAudioVolume: 1.0,
+      showSafeZones: this.showSafeZones(),
+      savedAt: Date.now(),
+    };
+
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+    } catch {
+      // localStorage full or unavailable
+    }
+  }
+
+  loadFromLocalStorage(): AutosaveData | null {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return null;
+
+      const data: AutosaveData = JSON.parse(raw);
+      const age = Date.now() - data.savedAt;
+
+      if (age > AUTOSAVE_TTL) {
+        localStorage.removeItem(AUTOSAVE_KEY);
+        return null;
+      }
+
+      if (data.textOverlays.length) this.textOverlays.set(data.textOverlays);
+      if (data.audioTracks.length) this.audioTracks.set(data.audioTracks);
+      if (data.brandPresetId) this.brandPresetId.set(data.brandPresetId);
+      this.videoFitMode.set(data.videoFitMode);
+      this.videoFitBackgroundColor.set(data.videoFitBackgroundColor);
+      this.showSafeZones.set(data.showSafeZones);
+
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  clearAutosave(): void {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  }
+
   reset(): void {
     this.sourceAsset.set(null);
+    this.sourceVideoUrl.set(null);
     this.selectedPreset.set(null);
     this.textOverlays.set([]);
     this.audioTracks.set([]);
@@ -197,5 +287,6 @@ export class StudioStore {
     this.renderState.set('idle');
     this.renderResult.set(null);
     this.renderProgress.set(0);
+    this.clearAutosave();
   }
 }

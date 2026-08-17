@@ -23,6 +23,12 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
       </header>
 
       <main class="studio-main">
+        @if (showRecoveredBanner()) {
+          <div class="recovery-banner">
+            <span>Se recuper&oacute; tu composici&oacute;n anterior</span>
+            <button class="banner-close" (click)="showRecoveredBanner.set(false)">&times;</button>
+          </div>
+        }
         <div class="studio-grid">
           <div class="preview-column">
             <div class="preview-wrapper">
@@ -307,6 +313,19 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
       margin: 0; letter-spacing: -0.03em; line-height: 1.1;
     }
     .tagline { font-size: 14px; color: var(--color-text-muted); margin: 6px 0 0; }
+
+    .recovery-banner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; margin-bottom: 20px;
+      background: var(--color-accent-glow); border: 1px solid var(--color-accent);
+      border-radius: 8px; font-size: 13px; color: var(--color-text-primary);
+      animation: fadeSlideIn 0.3s ease;
+    }
+    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    .banner-close {
+      background: none; border: none; font-size: 18px;
+      color: var(--color-text-muted); cursor: pointer; padding: 0 4px;
+    }
 
     .studio-grid {
       display: grid;
@@ -601,6 +620,7 @@ export class StudioPageComponent {
   readonly autoDuck = signal(false);
   readonly showSavePreset = signal(false);
   readonly presetName = signal('');
+  readonly showRecoveredBanner = signal(false);
 
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
@@ -609,8 +629,20 @@ export class StudioPageComponent {
   });
 
   constructor() {
+    const autosaveData = this.store.loadFromLocalStorage();
+    if (autosaveData && (autosaveData.textOverlays.length > 0 || autosaveData.audioTracks.length > 0)) {
+      this.showRecoveredBanner.set(true);
+      setTimeout(() => this.showRecoveredBanner.set(false), 5000);
+    }
+
     this.api.getBrandPresets().subscribe({
-      next: (res) => this.presets.set(res.presets),
+      next: (res) => {
+        this.presets.set(res.presets);
+        if (autosaveData?.brandPresetId) {
+          const brand = res.presets.find((p) => p.id === autosaveData.brandPresetId);
+          if (brand) this.store.setPreset(brand);
+        }
+      },
     });
     this.api.getTextPresets().subscribe({
       next: (res) => this.textPresets.set(res.presets),
