@@ -15,7 +15,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node"],
+    "types": ["node", "multer"],
     "lib": ["ES2022"]
   },
   "include": ["src/**/*.ts"],
