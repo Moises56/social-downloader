@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './tests',
   timeout: 30000,
   use: {
-    baseURL: 'http://localhost:4200',
+    baseURL: 'http://localhost:4205',
     headless: true,
     screenshot: 'only-on-failure',
   },

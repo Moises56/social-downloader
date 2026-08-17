@@ -17,6 +17,21 @@ function escapeDrawText(text: string): string {
     .replace(/\n/g, '\\n');
 }
 
+/**
+ * Convert CSS rgba() color to FFmpeg-compatible hex color (0xRRGGBBAA).
+ * FFmpeg drawtext does not support rgba() in filter expressions (parentheses break parsing).
+ */
+function sanitizeColorForFfmpeg(color: string): string {
+  const rgbaMatch = color.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i);
+  if (rgbaMatch) {
+    const [, r, g, b, a] = rgbaMatch;
+    const alpha = Math.round(parseFloat(a) * 255).toString(16).padStart(2, '0');
+    const hex = [r, g, b].map((v) => parseInt(v, 10).toString(16).padStart(2, '0')).join('');
+    return `0x${hex}${alpha}`;
+  }
+  return color;
+}
+
 export function buildRenderCommand(
   composition: VideoComposition,
   sourcePath: string,
@@ -217,7 +232,7 @@ function buildTextOverlayFilters(
   const fadeOutDuration = fadeOut !== 'none' ? 0.4 : 0;
 
   if (animation === 'none' && fadeOut === 'none') {
-    filters.push(`${inputLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${text.style.color}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${text.style.shadowColor ?? 'black@0.8'}:shadowx=2:shadowy=2` : ''}${text.style.letterSpacing ? `:spacing=${text.style.letterSpacing}` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
+    filters.push(`${inputLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
   } else {
     const phases = buildTextPhases(text.startTime, text.endTime, text.style.opacity, fadeInDuration, fadeOutDuration);
     let currentLabel = inputLabel;
@@ -228,7 +243,7 @@ function buildTextOverlayFilters(
         : basePos;
       const isLast = i === phases.length - 1;
       const outLabel = isLast ? `[t${overlayIndex}]` : `[tp${overlayIndex}_${i}]`;
-      filters.push(`${currentLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${text.style.color}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${text.style.shadowColor ?? 'black@0.8'}:shadowx=2:shadowy=2` : ''}${text.style.letterSpacing ? `:spacing=${text.style.letterSpacing}` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
+      filters.push(`${currentLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
       currentLabel = outLabel;
     }
   }
@@ -311,19 +326,15 @@ function buildBrandOverlayFilters(
     const drawtext = [
       `${currentLabel}drawtext=text='${escaped}'`,
       `fontsize=${brand.style.fontSize}`,
-      `fontcolor=${brand.style.color}@${phase.opacity}`,
+      `fontcolor=${sanitizeColorForFfmpeg(brand.style.color)}@${phase.opacity}`,
       `x=${pos.x}`,
       `y=${pos.y}`,
     ];
 
     if (brand.style.textShadow) {
-      drawtext.push(`shadowcolor=${brand.style.shadowColor ?? 'black@0.75'}`);
+      drawtext.push(`shadowcolor=${sanitizeColorForFfmpeg(brand.style.shadowColor ?? 'black@0.75')}`);
       drawtext.push(`shadowx=0`);
       drawtext.push(`shadowy=2`);
-    }
-
-    if (brand.style.letterSpacing) {
-      drawtext.push(`spacing=${Math.round(brand.style.letterSpacing * 100)}`);
     }
 
     drawtext.push(`enable='between(t\\,${phase.start}\\,${phase.end})'`);
