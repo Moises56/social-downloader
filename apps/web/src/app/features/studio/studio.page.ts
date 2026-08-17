@@ -4,12 +4,13 @@ import { FormsModule } from '@angular/forms';
 import { StudioStore } from './state/studio.store';
 import { StudioApiService } from './services/studio-api.service';
 import { VideoPreviewComponent } from './video-preview.component';
+import { TimelineComponent } from './timeline.component';
 import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, VideoPreviewComponent],
+  imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent],
   template: `
     <div class="studio-container">
       <header class="studio-header">
@@ -34,6 +35,18 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
               <p>Sube un video o arrastra aquí</p>
               <p class="upload-hint">MP4, MOV, WebM</p>
             </div>
+          }
+
+          @if (store.sourceVideoUrl()) {
+            <app-timeline
+              [duration]="store.totalDuration()"
+              [currentTime]="store.currentTime()"
+              [textOverlays]="store.textOverlays()"
+              [brandOverlays]="store.brandOverlays()"
+              [audioTracks]="store.audioTracks()"
+              (seekTo)="onSeekTimeline($event)"
+              (segmentUpdate)="onSegmentUpdate($event)">
+            </app-timeline>
           }
           <input #fileInput type="file" accept="video/*" (change)="onFileSelected($event)" hidden>
         </div>
@@ -293,5 +306,13 @@ export class StudioPageComponent {
 
   getDownloadUrl(renderId: string): string {
     return this.api.getDownloadUrl(renderId);
+  }
+
+  onSeekTimeline(time: number): void {
+    this.store.currentTime.set(time);
+  }
+
+  onSegmentUpdate(event: { id: string; start: number; end: number }): void {
+    this.store.updateTextOverlay(event.id, { startTime: event.start, endTime: event.end });
   }
 }
