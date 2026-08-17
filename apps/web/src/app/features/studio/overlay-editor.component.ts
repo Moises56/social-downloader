@@ -83,6 +83,20 @@ import type { TextOverlay, OverlayPosition } from '@social-downloader/contracts'
               <option value="95">Amplio (95%)</option>
             </select>
           </div>
+
+          <div class="field">
+            <label>Animación</label>
+            <div class="animation-row">
+              @for (anim of animations; track anim.value) {
+                <button
+                  class="anim-btn"
+                  [class.active]="(ov.animationIn ?? 'none') === anim.value"
+                  (click)="updateField('animationIn', anim.value); updateField('animationOut', anim.value === 'none' ? 'none' : 'fade-out')">
+                  {{ anim.label }}
+                </button>
+              }
+            </div>
+          </div>
         </div>
       </div>
     }
@@ -162,6 +176,14 @@ import type { TextOverlay, OverlayPosition } from '@social-downloader/contracts'
       background: var(--color-bg); border: 1px solid var(--color-border);
       border-radius: 6px; color: var(--color-text-primary); font-size: 13px;
     }
+    .animation-row { display: flex; gap: 4px; }
+    .anim-btn {
+      flex: 1; padding: 6px 4px; border: 1px solid var(--color-border); border-radius: 6px;
+      background: var(--color-bg); color: var(--color-text-secondary);
+      cursor: pointer; font-size: 10px; font-weight: 500; transition: all var(--transition-fast);
+    }
+    .anim-btn:hover { border-color: var(--color-accent); }
+    .anim-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
   `],
 })
 export class OverlayEditorComponent {
@@ -182,6 +204,13 @@ export class OverlayEditorComponent {
   ];
 
   readonly colorOptions = ['#f6efe2', '#ffffff', '#fef3c7', '#dbeafe', '#fce7f3', '#d1fae5'];
+
+  readonly animations = [
+    { value: 'none', label: 'Ninguna' },
+    { value: 'fade-in', label: 'Fade' },
+    { value: 'slide-up', label: 'Fade Up' },
+    { value: 'soft-reveal', label: 'Soft Zoom' },
+  ];
 
   readonly maxWidthOption = signal('85');
 

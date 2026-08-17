@@ -152,34 +152,107 @@ function buildTextOverlayFilters(
   height: number,
 ): string[] {
   const filters: string[] = [];
-  const pos = computePosition(text.position, text.customPosition, width, height, text.style.fontSize);
-
+  const basePos = computePosition(text.position, text.customPosition, width, height, text.style.fontSize);
   const escaped = escapeDrawText(text.text);
+  const animation = text.animationIn ?? 'none';
+  const fadeOut = text.animationOut ?? 'none';
+  const fadeInDuration = animation !== 'none' ? 0.4 : 0;
+  const fadeOutDuration = fadeOut !== 'none' ? 0.4 : 0;
 
+  if (animation === 'none' && fadeOut === 'none') {
+    filters.push(buildSingleDrawtext(escaped, text.style, basePos, text.startTime, text.endTime));
+  } else {
+    const phases = buildTextPhases(text.startTime, text.endTime, text.style.opacity, fadeInDuration, fadeOutDuration);
+    for (const phase of phases) {
+      const pos = animation === 'slide-up' && phase.opacity < text.style.opacity
+        ? { x: basePos.x, y: String(Number(basePos.y) + Math.round((1 - phase.opacity / text.style.opacity) * 30)) }
+        : basePos;
+      filters.push(buildSingleDrawtext(escaped, text.style, pos, phase.start, phase.end, phase.opacity));
+    }
+  }
+
+  return filters;
+}
+
+function buildSingleDrawtext(
+  escaped: string,
+  style: { fontSize: number; color: string; opacity: number; textShadow?: boolean; shadowColor?: string; letterSpacing?: number },
+  pos: { x: string; y: string },
+  start: number,
+  end: number,
+  opacity?: number,
+): string {
   const drawtext = [
     `drawtext=text='${escaped}'`,
-    `fontsize=${text.style.fontSize}`,
-    `fontcolor=${text.style.color}@${text.style.opacity}`,
+    `fontsize=${style.fontSize}`,
+    `fontcolor=${style.color}@${opacity ?? style.opacity}`,
     `x=${pos.x}`,
     `y=${pos.y}`,
   ];
 
-  if (text.style.textShadow) {
-    drawtext.push(`shadowcolor=${text.style.shadowColor ?? 'black@0.8'}`);
+  if (style.textShadow) {
+    drawtext.push(`shadowcolor=${style.shadowColor ?? 'black@0.8'}`);
     drawtext.push(`shadowx=2`);
     drawtext.push(`shadowy=2`);
   }
 
-  if (text.style.letterSpacing) {
-    drawtext.push(`spacing=${text.style.letterSpacing}`);
+  if (style.letterSpacing) {
+    drawtext.push(`spacing=${style.letterSpacing}`);
   }
 
-  const startFilter = `enable='between(t\\,${text.startTime}\\,${text.endTime})'`;
-  drawtext.push(startFilter);
+  drawtext.push(`enable='between(t\\,${start}\\,${end})'`);
 
-  filters.push(drawtext.join(':'));
+  return drawtext.join(':');
+}
 
-  return filters;
+function buildTextPhases(
+  start: number,
+  end: number,
+  baseOpacity: number,
+  fadeInSec: number,
+  fadeOutSec: number,
+): Array<{ start: number; end: number; opacity: number }> {
+  if (fadeInSec === 0 && fadeOutSec === 0) {
+    return [{ start, end, opacity: baseOpacity }];
+  }
+
+  const phases: Array<{ start: number; end: number; opacity: number }> = [];
+  const fadeInEnd = start + fadeInSec;
+  const fadeOutStart = end - fadeOutSec;
+
+  if (fadeInSec > 0) {
+    const steps = 4;
+    const stepDuration = fadeInSec / steps;
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 1) / steps;
+      phases.push({
+        start: start + i * stepDuration,
+        end: start + (i + 1) * stepDuration,
+        opacity: Math.round(baseOpacity * t * 100) / 100,
+      });
+    }
+  }
+
+  const stableStart = fadeInSec > 0 ? fadeInEnd : start;
+  const stableEnd = fadeOutSec > 0 ? fadeOutStart : end;
+  if (stableStart < stableEnd) {
+    phases.push({ start: stableStart, end: stableEnd, opacity: baseOpacity });
+  }
+
+  if (fadeOutSec > 0) {
+    const steps = 4;
+    const stepDuration = fadeOutSec / steps;
+    for (let i = 0; i < steps; i++) {
+      const t = 1 - (i + 1) / steps;
+      phases.push({
+        start: fadeOutStart + i * stepDuration,
+        end: fadeOutStart + (i + 1) * stepDuration,
+        opacity: Math.round(baseOpacity * t * 100) / 100,
+      });
+    }
+  }
+
+  return phases;
 }
 
 function buildBrandOverlayFilters(
