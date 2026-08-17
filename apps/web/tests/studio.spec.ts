@@ -297,6 +297,11 @@ test.describe('Studio', () => {
       await uploadVideo(page);
       await page.locator('.topbar-chip:has-text("Devotional")').first().click();
       await expect(page.locator('[data-overlay-id]')).toBeVisible({ timeout: 5000 });
+      // The preview canvas resolves its size from an aspect-ratio + flex layout chain
+      // (host height → wrapper → stage → 9:16 box); give it a frame to settle before
+      // reading geometry, since our synthetic-pointer drag below bypasses Playwright's
+      // built-in actionability/stability wait that .click() normally provides.
+      await page.waitForTimeout(250);
 
       // Land just inside the snap threshold of horizontal center (x=0.5).
       const result = await dragFirstOverlayTo(page, 0.49);
@@ -312,6 +317,7 @@ test.describe('Studio', () => {
       await uploadVideo(page);
       await page.locator('.topbar-chip:has-text("Devotional")').first().click();
       await expect(page.locator('[data-overlay-id]')).toBeVisible({ timeout: 5000 });
+      await page.waitForTimeout(250); // let the aspect-ratio layout chain settle (see above)
 
       // Well outside the snap threshold — no guide should ever appear.
       const result = await dragFirstOverlayTo(page, 0.2);

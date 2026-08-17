@@ -24,8 +24,9 @@ interface DragState {
   imports: [CommonModule],
   template: `
     <div class="preview-wrapper">
-      <div class="preview-viewport" #viewport
-        (pointerdown)="onViewportPointerDown($event)">
+      <div class="viewport-stage">
+        <div class="preview-viewport" #viewport
+          (pointerdown)="onViewportPointerDown($event)">
         <video
           #videoEl
           [src]="src()"
@@ -88,6 +89,7 @@ interface DragState {
           }
         </div>
       </div>
+      </div>
 
       <div class="preview-controls">
         <button class="control-btn" (click)="togglePlay(); $event.stopPropagation()">
@@ -106,10 +108,21 @@ interface DragState {
     </div>
   `,
   styles: [`
-    .preview-wrapper { display: flex; flex-direction: column; gap: 0; }
+    :host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .preview-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 0; }
+    /* Centers the 9:16 canvas and lets it shrink to whichever dimension the
+       surrounding panel actually constrains — on a wide desktop screen that's the
+       available HEIGHT, not the width. Without this, "width: 100%; aspect-ratio: 9/16"
+       computes a height far taller than the panel and gets clipped by its overflow,
+       making the preview look cropped/cut off. */
+    .viewport-stage {
+      flex: 1; min-height: 0; min-width: 0;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
     .preview-viewport {
-      position: relative; width: 100%; aspect-ratio: 9/16;
-      background: #000; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      position: relative; aspect-ratio: 9/16; height: 100%; max-width: 100%;
+      background: #000; border-radius: var(--radius-lg);
       overflow: hidden; touch-action: none;
     }
     .preview-video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
@@ -179,11 +192,10 @@ interface DragState {
 
     .preview-controls {
       display: flex; align-items: center; gap: 12px;
-      padding: 12px 16px;
+      padding: 12px 16px; margin-top: 10px; flex-shrink: 0;
       background: var(--color-surface);
-      border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+      border-radius: var(--radius-lg);
       border: 1px solid var(--color-border-subtle);
-      border-top: none;
     }
     .control-btn {
       width: 36px; height: 36px; border-radius: 50%;
@@ -219,13 +231,23 @@ export class VideoPreviewComponent implements OnDestroy {
   readonly dragging = signal<DragState | null>(null);
   readonly activeGuides = signal<Array<{ axis: 'horizontal' | 'vertical'; style: string }>>([]);
 
-  private previewScale = 1;
+  // Tracked reactively (not read imperatively per-call) so overlay pixel positions and
+  // font scaling stay correct whenever the 9:16 canvas resizes for a reason unrelated to
+  // any signal this component reads — e.g. a warnings banner or the recovery bar in the
+  // parent page changing the available height, which now also changes this canvas's
+  // width since it derives its size from height (see .viewport-stage/.preview-viewport).
+  readonly previewSize = signal<{ width: number; height: number }>({ width: 300, height: 533 });
+  private resizeObserver?: ResizeObserver;
   private dragCurrent = signal<NormalizedPosition>({ x: 0, y: 0 });
   private snapPoints = computeSnapPoints();
 
   constructor() {
     afterNextRender(() => {
       this.updateScale();
+      const el = this.viewport()?.nativeElement;
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      this.resizeObserver = new ResizeObserver(() => this.updateScale());
+      this.resizeObserver.observe(el);
     });
   }
 
@@ -380,9 +402,7 @@ export class VideoPreviewComponent implements OnDestroy {
     const isDragging = this.dragging()?.overlayId === overlay.id;
     const pos = isDragging ? this.dragCurrent() : this.getOverlayPosition(overlay);
 
-    const vp = this.viewport()?.nativeElement;
-    const vpWidth = vp?.clientWidth ?? 300;
-    const vpHeight = vp?.clientHeight ?? 533;
+    const { width: vpWidth, height: vpHeight } = this.previewSize();
     const pixels = normalizedToPixels(pos, vpWidth, vpHeight);
 
     return {
@@ -406,9 +426,7 @@ export class VideoPreviewComponent implements OnDestroy {
     const isDragging = this.dragging()?.overlayId === brand.id;
     const pos = isDragging ? this.dragCurrent() : this.getBrandPosition(brand);
 
-    const vp = this.viewport()?.nativeElement;
-    const vpWidth = vp?.clientWidth ?? 300;
-    const vpHeight = vp?.clientHeight ?? 533;
+    const { width: vpWidth, height: vpHeight } = this.previewSize();
     const pixels = normalizedToPixels(pos, vpWidth, vpHeight);
 
     return {
@@ -444,7 +462,7 @@ export class VideoPreviewComponent implements OnDestroy {
   }
 
   scaleFontSize(fontSize: number): number {
-    return Math.round(fontSize * this.previewScale);
+    return Math.round(fontSize * (this.previewSize().width / 1080));
   }
 
   formatTime(seconds: number): string {
@@ -456,10 +474,11 @@ export class VideoPreviewComponent implements OnDestroy {
   private updateScale(): void {
     const el = this.viewport()?.nativeElement;
     if (!el) return;
-    this.previewScale = el.clientWidth / 1080;
+    this.previewSize.set({ width: el.clientWidth, height: el.clientHeight });
   }
 
   ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
     const video = this.videoEl()?.nativeElement;
     if (video) {
       video.pause();
