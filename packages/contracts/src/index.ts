@@ -200,6 +200,14 @@ export interface ExportPreset {
   tags: string[];
 }
 
+export type VideoFitMode = 'crop' | 'fit-blur' | 'fit-background';
+
+export interface VideoFitConfig {
+  mode: VideoFitMode;
+  backgroundColor?: string;
+  backgroundGradient?: string;
+}
+
 export interface VideoSource {
   assetId: string;
   fileName: string;
@@ -252,6 +260,7 @@ export interface VideoComposition {
   output: OutputPreset;
   brandPresetId?: string;
   exportPresetId?: string;
+  videoFit?: VideoFitConfig;
   overlays: BrandOverlay[];
   textTracks: TextOverlay[];
   audioTracks: AudioTrack[];
@@ -294,6 +303,7 @@ export interface CreateCompositionRequest {
   sourceAssetId: string;
   brandPresetId?: string;
   exportPresetId?: string;
+  videoFit?: VideoFitConfig;
   overlays?: BrandOverlay[];
   textTracks?: TextOverlay[];
   audioTracks?: AudioTrack[];

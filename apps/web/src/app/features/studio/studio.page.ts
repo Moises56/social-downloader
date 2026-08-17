@@ -7,7 +7,7 @@ import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
-import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset, VideoFitMode } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
@@ -140,6 +140,42 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
             (removeTrack)="store.removeAudioTrack($event)"
             (updateTrack)="onUpdateAudioTrack($event)">
           </app-audio-panel>
+
+          <section class="panel-section">
+            <h3>Ajuste de video</h3>
+            <div class="fit-mode-grid">
+              <button
+                class="fit-mode-btn"
+                [class.active]="store.videoFitMode() === 'crop'"
+                (click)="store.videoFitMode.set('crop')">
+                <span class="fm-icon">&#9638;</span>
+                <span class="fm-label">Crop</span>
+                <span class="fm-desc">Llena 9:16</span>
+              </button>
+              <button
+                class="fit-mode-btn"
+                [class.active]="store.videoFitMode() === 'fit-blur'"
+                (click)="store.videoFitMode.set('fit-blur')">
+                <span class="fm-icon">&#9636;</span>
+                <span class="fm-label">Fit + Blur</span>
+                <span class="fm-desc">Fondo borroso</span>
+              </button>
+              <button
+                class="fit-mode-btn"
+                [class.active]="store.videoFitMode() === 'fit-background'"
+                (click)="store.videoFitMode.set('fit-background')">
+                <span class="fm-icon">&#9635;</span>
+                <span class="fm-label">Fit + Color</span>
+                <span class="fm-desc">Color sólido</span>
+              </button>
+            </div>
+            @if (store.videoFitMode() === 'fit-background') {
+              <div class="bg-color-row">
+                <label>Fondo:</label>
+                <input type="color" [value]="store.videoFitBackgroundColor()" (input)="store.videoFitBackgroundColor.set($any($event.target).value)">
+              </div>
+            }
+          </section>
 
           <section class="panel-section">
             <h3>Exportar</h3>
@@ -302,6 +338,21 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .ep-desc { font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
     .ep-meta { font-size: 10px; color: var(--color-text-secondary); margin-top: 4px; font-variant-numeric: tabular-nums; }
     .ep-est { font-size: 10px; color: var(--color-text-muted); font-style: italic; }
+    .fit-mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .fit-mode-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 12px 8px; background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .fit-mode-btn:hover { border-color: var(--color-accent); }
+    .fit-mode-btn.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
+    .fm-icon { font-size: 20px; color: var(--color-text-secondary); }
+    .fit-mode-btn.active .fm-icon { color: var(--color-accent); }
+    .fm-label { font-size: 11px; font-weight: 600; color: var(--color-text-primary); }
+    .fm-desc { font-size: 9px; color: var(--color-text-muted); }
+    .bg-color-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--color-text-secondary); }
+    .bg-color-row input[type="color"] { width: 32px; height: 28px; border: 1px solid var(--color-border); border-radius: 4px; cursor: pointer; background: none; }
     .render-btn { width: 100%; padding: 16px; background: linear-gradient(135deg, var(--color-accent), #2563eb); border: none; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; transition: all var(--transition-fast); letter-spacing: 0.01em; }
     .render-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 20px var(--color-accent-glow); }
     .render-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
@@ -476,6 +527,7 @@ export class StudioPageComponent {
       sourceAssetId: asset.id,
       brandPresetId: this.store.selectedPreset()?.id,
       exportPresetId: this.store.selectedExportPreset()?.id,
+      videoFit: this.store.videoFit(),
       textTracks: this.store.textOverlays(),
       audioTracks: this.store.audioTracks(),
       keepOriginalAudio: this.keepOriginalAudio(),

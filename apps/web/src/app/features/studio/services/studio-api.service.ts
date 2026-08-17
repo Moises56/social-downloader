@@ -15,6 +15,7 @@ import type {
   SavedCompositionPresetsResponse,
   TextOverlay,
   AudioTrack,
+  VideoFitConfig,
 } from '@social-downloader/contracts';
 
 @Injectable({ providedIn: 'root' })
@@ -51,6 +52,7 @@ export class StudioApiService {
     sourceAssetId: string;
     brandPresetId?: string;
     exportPresetId?: string;
+    videoFit?: VideoFitConfig;
     textTracks?: TextOverlay[];
     audioTracks?: AudioTrack[];
     keepOriginalAudio?: boolean;

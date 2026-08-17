@@ -172,6 +172,7 @@ export class StudioController {
       output,
       brandPresetId: body.brandPresetId,
       exportPresetId: body.exportPresetId,
+      videoFit: body.videoFit,
       overlays: body.overlays ?? [],
       textTracks: body.textTracks ?? [],
       audioTracks: body.audioTracks ?? [],

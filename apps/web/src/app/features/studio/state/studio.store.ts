@@ -7,6 +7,8 @@ import type {
   RenderedVideo,
   SavedCompositionPreset,
   ExportPreset,
+  VideoFitMode,
+  VideoFitConfig,
 } from '@social-downloader/contracts';
 
 export interface StudioAsset {
@@ -35,6 +37,8 @@ export class StudioStore {
   readonly savedPresets = signal<SavedCompositionPreset[]>([]);
   readonly brandPresetId = signal<string | null>(null);
   readonly selectedExportPreset = signal<ExportPreset | null>(null);
+  readonly videoFitMode = signal<VideoFitMode>('crop');
+  readonly videoFitBackgroundColor = signal<string>('#000000');
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
@@ -100,6 +104,11 @@ export class StudioStore {
     }
     return [];
   });
+
+  readonly videoFit = computed<VideoFitConfig>(() => ({
+    mode: this.videoFitMode(),
+    backgroundColor: this.videoFitBackgroundColor(),
+  }));
 
   setSource(asset: StudioAsset, videoUrl?: string): void {
     this.sourceAsset.set(asset);

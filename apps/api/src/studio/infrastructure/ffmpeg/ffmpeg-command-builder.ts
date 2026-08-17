@@ -34,13 +34,7 @@ export function buildRenderCommand(
   const videoFilters: string[] = [];
   const { output } = composition;
 
-  videoFilters.push(
-    `scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease`,
-    `pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:color=black`,
-    `fps=${output.fps}`,
-    'format=yuv420p',
-  );
-
+  const fitMode = composition.videoFit?.mode ?? 'crop';
   const textOverlays = composition.textTracks.filter(
     (t) => t.startTime < t.endTime,
   );
@@ -48,12 +42,64 @@ export function buildRenderCommand(
     (o) => o.startTime < o.endTime,
   );
 
+  if (fitMode === 'fit-blur') {
+    videoFilters.push(
+      `[0:v]split=2[bg][fg]`,
+      `[bg]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,crop=${output.width}:${output.height},boxblur=20:5,eq=brightness=-0.1[blurred]`,
+      `[fg]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease[scaled]`,
+      `[blurred][scaled]overlay=(W-w)/2:(H-h)/2,fps=${output.fps},format=yuv420p[composed]`,
+    );
+  } else if (fitMode === 'fit-background') {
+    const bgColor = composition.videoFit?.backgroundColor ?? '#000000';
+    videoFilters.push(
+      `color=c=${bgColor}:s=${output.width}x${output.height}:d=999[canvas]`,
+      `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease[scaled]`,
+      `[canvas][scaled]overlay=(W-w)/2:(H-h)/2,fps=${output.fps},format=yuv420p[composed]`,
+    );
+  } else {
+    // crop (default)
+    videoFilters.push(
+      `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase`,
+      `crop=${output.width}:${output.height}`,
+      `fps=${output.fps}`,
+      'format=yuv420p[composed]',
+    );
+  }
+
+  const inputLabel = '[composed]';
+  let currentInputLabel = inputLabel;
+  let overlayIndex = 0;
+
   for (const text of textOverlays) {
-    videoFilters.push(...buildTextOverlayFilters(text, output.width, output.height));
+    const filters = buildTextOverlayFilters(text, output.width, output.height, currentInputLabel, overlayIndex);
+    if (filters.length > 0) {
+      videoFilters.push(...filters);
+      // The last filter's output becomes the input for the next overlay
+      const lastFilter = filters[filters.length - 1];
+      const outputMatch = lastFilter.match(/\[(\w+)\]\s*$/);
+      if (outputMatch) {
+        currentInputLabel = `[${outputMatch[1]}]`;
+      }
+      overlayIndex++;
+    }
   }
 
   for (const brand of brandOverlays) {
-    videoFilters.push(...buildBrandOverlayFilters(brand, output.width, output.height));
+    const filters = buildBrandOverlayFilters(brand, output.width, output.height, currentInputLabel, overlayIndex);
+    if (filters.length > 0) {
+      videoFilters.push(...filters);
+      const lastFilter = filters[filters.length - 1];
+      const outputMatch = lastFilter.match(/\[(\w+)\]\s*$/);
+      if (outputMatch) {
+        currentInputLabel = `[${outputMatch[1]}]`;
+      }
+      overlayIndex++;
+    }
+  }
+
+  // Final output label
+  if (currentInputLabel !== '[vout]') {
+    videoFilters.push(`${currentInputLabel}null[vout]`);
   }
 
   const hasAudioTracks = composition.audioTracks.length > 0;
@@ -61,13 +107,13 @@ export function buildRenderCommand(
 
   if (hasAudioTracks || hasOriginalAudio) {
     const audioFilters = buildAudioFilters(composition);
-    const videoChain = `[0:v]${videoFilters.join(',')}[vout]`;
+    const videoChain = videoFilters.join(',');
     const allFilters = [videoChain, ...audioFilters];
     args.push('-filter_complex', allFilters.join(';'));
     args.push('-map', '[vout]');
     args.push('-map', '[aout]');
   } else {
-    const videoChain = `[0:v]${videoFilters.join(',')}[vout]`;
+    const videoChain = videoFilters.join(',');
     args.push('-filter_complex', videoChain);
     args.push('-map', '[vout]');
   }
@@ -159,6 +205,8 @@ function buildTextOverlayFilters(
   text: TextOverlay,
   width: number,
   height: number,
+  inputLabel: string,
+  overlayIndex: number,
 ): string[] {
   const filters: string[] = [];
   const basePos = computePosition(text.position, text.customPosition, width, height, text.style.fontSize);
@@ -169,49 +217,23 @@ function buildTextOverlayFilters(
   const fadeOutDuration = fadeOut !== 'none' ? 0.4 : 0;
 
   if (animation === 'none' && fadeOut === 'none') {
-    filters.push(buildSingleDrawtext(escaped, text.style, basePos, text.startTime, text.endTime));
+    filters.push(`${inputLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${text.style.color}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${text.style.shadowColor ?? 'black@0.8'}:shadowx=2:shadowy=2` : ''}${text.style.letterSpacing ? `:spacing=${text.style.letterSpacing}` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
   } else {
     const phases = buildTextPhases(text.startTime, text.endTime, text.style.opacity, fadeInDuration, fadeOutDuration);
-    for (const phase of phases) {
+    let currentLabel = inputLabel;
+    for (let i = 0; i < phases.length; i++) {
+      const phase = phases[i];
       const pos = animation === 'slide-up' && phase.opacity < text.style.opacity
         ? { x: basePos.x, y: String(Number(basePos.y) + Math.round((1 - phase.opacity / text.style.opacity) * 30)) }
         : basePos;
-      filters.push(buildSingleDrawtext(escaped, text.style, pos, phase.start, phase.end, phase.opacity));
+      const isLast = i === phases.length - 1;
+      const outLabel = isLast ? `[t${overlayIndex}]` : `[tp${overlayIndex}_${i}]`;
+      filters.push(`${currentLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${text.style.color}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${text.style.shadowColor ?? 'black@0.8'}:shadowx=2:shadowy=2` : ''}${text.style.letterSpacing ? `:spacing=${text.style.letterSpacing}` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
+      currentLabel = outLabel;
     }
   }
 
   return filters;
-}
-
-function buildSingleDrawtext(
-  escaped: string,
-  style: { fontSize: number; color: string; opacity: number; textShadow?: boolean; shadowColor?: string; letterSpacing?: number },
-  pos: { x: string; y: string },
-  start: number,
-  end: number,
-  opacity?: number,
-): string {
-  const drawtext = [
-    `drawtext=text='${escaped}'`,
-    `fontsize=${style.fontSize}`,
-    `fontcolor=${style.color}@${opacity ?? style.opacity}`,
-    `x=${pos.x}`,
-    `y=${pos.y}`,
-  ];
-
-  if (style.textShadow) {
-    drawtext.push(`shadowcolor=${style.shadowColor ?? 'black@0.8'}`);
-    drawtext.push(`shadowx=2`);
-    drawtext.push(`shadowy=2`);
-  }
-
-  if (style.letterSpacing) {
-    drawtext.push(`spacing=${style.letterSpacing}`);
-  }
-
-  drawtext.push(`enable='between(t\\,${start}\\,${end})'`);
-
-  return drawtext.join(':');
 }
 
 function buildTextPhases(
@@ -268,6 +290,8 @@ function buildBrandOverlayFilters(
   brand: BrandOverlay,
   width: number,
   height: number,
+  inputLabel: string,
+  overlayIndex: number,
 ): string[] {
   const filters: string[] = [];
   const pos = computePosition(brand.position, undefined, width, height, brand.style.fontSize);
@@ -279,9 +303,13 @@ function buildBrandOverlayFilters(
 
   const phases = buildBrandPhases(brand.startTime, brand.endTime, brand.opacity, fadeInDuration, fadeOutDuration);
 
-  for (const phase of phases) {
+  let currentLabel = inputLabel;
+  for (let i = 0; i < phases.length; i++) {
+    const phase = phases[i];
+    const isLast = i === phases.length - 1;
+    const outLabel = isLast ? `[b${overlayIndex}]` : `[bp${overlayIndex}_${i}]`;
     const drawtext = [
-      `drawtext=text='${escaped}'`,
+      `${currentLabel}drawtext=text='${escaped}'`,
       `fontsize=${brand.style.fontSize}`,
       `fontcolor=${brand.style.color}@${phase.opacity}`,
       `x=${pos.x}`,
@@ -299,8 +327,10 @@ function buildBrandOverlayFilters(
     }
 
     drawtext.push(`enable='between(t\\,${phase.start}\\,${phase.end})'`);
+    drawtext.push(outLabel);
 
     filters.push(drawtext.join(':'));
+    currentLabel = outLabel;
   }
 
   return filters;
