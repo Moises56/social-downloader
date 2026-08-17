@@ -13,9 +13,11 @@ import type {
   RenderStatusResponse,
   SaveCompositionPresetResponse,
   SavedCompositionPresetsResponse,
+  ValidateCompositionResponse,
   TextOverlay,
   AudioTrack,
   VideoFitConfig,
+  VideoComposition,
 } from '@social-downloader/contracts';
 
 @Injectable({ providedIn: 'root' })
@@ -84,6 +86,13 @@ export class StudioApiService {
 
   deleteSavedPreset(presetId: string): Observable<unknown> {
     return this.http.delete(`${this.baseUrl}/presets/${presetId}`);
+  }
+
+  validateComposition(composition: VideoComposition): Observable<ValidateCompositionResponse> {
+    return this.http.post<ValidateCompositionResponse>(
+      `${this.baseUrl}/validate`,
+      { composition },
+    );
   }
 
   startRender(compositionId: string): Observable<StartRenderResponse> {

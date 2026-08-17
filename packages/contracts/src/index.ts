@@ -375,6 +375,23 @@ export interface DeleteCompositionPresetRequest {
   presetId: string;
 }
 
+export interface ValidationWarning {
+  id: string;
+  type: 'text' | 'timing' | 'safe-zone' | 'overlap' | 'audio';
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  overlayId?: string;
+  trackId?: string;
+}
+
+export interface ValidateCompositionRequest {
+  composition: VideoComposition;
+}
+
+export interface ValidateCompositionResponse {
+  warnings: ValidationWarning[];
+}
+
 export interface ExportPresetsResponse {
   presets: ExportPreset[];
 }

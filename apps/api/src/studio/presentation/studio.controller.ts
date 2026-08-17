@@ -31,6 +31,8 @@ import type {
   SaveCompositionPresetRequest,
   SaveCompositionPresetResponse,
   SavedCompositionPresetsResponse,
+  ValidateCompositionRequest,
+  ValidateCompositionResponse,
   VideoComposition,
   RenderedVideo,
   SavedCompositionPreset,
@@ -39,6 +41,7 @@ import { BrandPresetService } from '../application/brand-preset.service';
 import { TextPresetService } from '../application/text-preset.service';
 import { CompositionPresetService } from '../application/composition-preset.service';
 import { ExportPresetService } from '../application/export-preset.service';
+import { CompositionValidationService } from '../application/composition-validation.service';
 import { TextOverlayService } from '../application/text-overlay.service';
 import { AudioMixingService } from '../application/audio-mixing.service';
 import { TempAssetStorage } from '../infrastructure/storage/temp-asset-storage.service';
@@ -56,6 +59,7 @@ export class StudioController {
     private readonly textPresets: TextPresetService,
     private readonly compositionPresets: CompositionPresetService,
     private readonly exportPresets: ExportPresetService,
+    private readonly validation: CompositionValidationService,
     private readonly textOverlays: TextOverlayService,
     private readonly audioMixing: AudioMixingService,
     private readonly storage: TempAssetStorage,
@@ -80,6 +84,13 @@ export class StudioController {
   @Get('export-presets')
   getExportPresets(): ExportPresetsResponse {
     return { presets: this.exportPresets.listPresets() };
+  }
+
+  @Post('validate')
+  validateComposition(
+    @Body() body: ValidateCompositionRequest,
+  ): ValidateCompositionResponse {
+    return { warnings: this.validation.validate(body.composition) };
   }
 
   @Post('sources/upload')

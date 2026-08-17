@@ -9,6 +9,7 @@ import type {
   ExportPreset,
   VideoFitMode,
   VideoFitConfig,
+  ValidationWarning,
 } from '@social-downloader/contracts';
 
 export interface StudioAsset {
@@ -58,6 +59,7 @@ export class StudioStore {
   readonly selectedExportPreset = signal<ExportPreset | null>(null);
   readonly videoFitMode = signal<VideoFitMode>('crop');
   readonly videoFitBackgroundColor = signal<string>('#000000');
+  readonly validationWarnings = signal<ValidationWarning[]>([]);
 
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -275,6 +277,10 @@ export class StudioStore {
 
   clearAutosave(): void {
     localStorage.removeItem(AUTOSAVE_KEY);
+  }
+
+  setValidationWarnings(warnings: ValidationWarning[]): void {
+    this.validationWarnings.set(warnings);
   }
 
   reset(): void {

@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StudioStore } from './state/studio.store';
@@ -29,6 +29,22 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
             <button class="banner-close" (click)="showRecoveredBanner.set(false)">&times;</button>
           </div>
         }
+
+        @if (warningCount() > 0) {
+          <div class="warnings-bar">
+            <span class="warnings-icon">!</span>
+            <span>{{ warningCount() }} advertencia{{ warningCount() > 1 ? 's' : '' }}{{ errorCount() > 0 ? ' (' + errorCount() + ' error' + (errorCount() > 1 ? 'es' : '') + ')' : '' }}</span>
+            <div class="warnings-list">
+              @for (w of store.validationWarnings(); track w.id) {
+                <div class="warning-item" [class]="'severity-' + w.severity">
+                  <span class="warning-type">{{ w.type }}</span>
+                  <span class="warning-msg">{{ w.message }}</span>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
         <div class="studio-grid">
           <div class="preview-column">
             <div class="preview-wrapper">
@@ -326,6 +342,44 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
       background: none; border: none; font-size: 18px;
       color: var(--color-text-muted); cursor: pointer; padding: 0 4px;
     }
+
+    .warnings-bar {
+      position: relative;
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; margin-bottom: 20px;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      border-radius: 8px; font-size: 12px; color: var(--color-text-secondary);
+      cursor: pointer;
+    }
+    .warnings-bar:hover .warnings-list { display: block; }
+    .warnings-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #f59e0b; color: #fff; font-size: 11px; font-weight: 700;
+    }
+    .warnings-list {
+      display: none; position: absolute; top: 100%; left: 0; right: 0;
+      z-index: 10; background: var(--color-surface);
+      border: 1px solid var(--color-border); border-radius: 8px;
+      padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      max-height: 240px; overflow-y: auto;
+    }
+    .warnings-bar:hover .warnings-list { display: block; }
+    .warning-item {
+      display: flex; gap: 8px; padding: 6px 8px;
+      border-radius: 4px; font-size: 11px; line-height: 1.4;
+    }
+    .warning-item.severity-error { background: rgba(239,68,68,0.08); }
+    .warning-item.severity-warning { background: rgba(245,158,11,0.08); }
+    .warning-item.severity-info { background: rgba(59,130,246,0.06); }
+    .warning-type {
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; min-width: 50px; padding-top: 1px;
+    }
+    .severity-error .warning-type { color: var(--color-danger); }
+    .severity-warning .warning-type { color: #f59e0b; }
+    .severity-info .warning-type { color: #3b82f6; }
+    .warning-msg { color: var(--color-text-secondary); }
 
     .studio-grid {
       display: grid;
@@ -628,7 +682,22 @@ export class StudioPageComponent {
     return this.store.textOverlays().find((o) => o.id === id) ?? null;
   });
 
+  readonly warningCount = computed(() => this.store.validationWarnings().length);
+  readonly errorCount = computed(() => this.store.validationWarnings().filter((w) => w.severity === 'error').length);
+
+  private validateTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
+    effect(() => {
+      const _overlays = this.store.textOverlays();
+      const _audio = this.store.audioTracks();
+      const _duration = this.store.totalDuration();
+      const _brand = this.store.selectedPreset();
+
+      if (this.validateTimer) clearTimeout(this.validateTimer);
+      this.validateTimer = setTimeout(() => this.runValidation(), 500);
+    });
+
     const autosaveData = this.store.loadFromLocalStorage();
     if (autosaveData && (autosaveData.textOverlays.length > 0 || autosaveData.audioTracks.length > 0)) {
       this.showRecoveredBanner.set(true);
@@ -931,6 +1000,32 @@ export class StudioPageComponent {
   deleteSavedPreset(presetId: string): void {
     this.api.deleteSavedPreset(presetId).subscribe({
       next: () => this.store.removeSavedPreset(presetId),
+    });
+  }
+
+  private runValidation(): void {
+    const duration = this.store.totalDuration();
+    if (!duration) {
+      this.store.setValidationWarnings([]);
+      return;
+    }
+
+    const composition = {
+      id: 'temp-validation',
+      source: { assetId: 'temp', fileName: 'temp', duration },
+      output: { width: 1080, height: 1920, fps: 30, format: 'mp4' as const, videoCodec: 'h264' as const, audioCodec: 'aac' as const, crf: 23, preset: 'fast' as const, audioBitrate: '128k', audioSampleRate: 48000, audioChannels: 2, movflags: '+faststart' },
+      overlays: this.store.brandOverlays(),
+      textTracks: this.store.textOverlays(),
+      audioTracks: this.store.audioTracks(),
+      keepOriginalAudio: true,
+      originalAudioVolume: 1.0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.api.validateComposition(composition).subscribe({
+      next: (res) => this.store.setValidationWarnings(res.warnings),
+      error: () => this.store.setValidationWarnings([]),
     });
   }
 }
