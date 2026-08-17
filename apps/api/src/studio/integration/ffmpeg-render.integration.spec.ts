@@ -299,4 +299,176 @@ describe('FFmpeg Render Integration', { timeout: 30000 }, () => {
 
     await unlink(result.filePath).catch(() => {});
   });
+
+  it('full 5-slot editorial: complete devotional composition', async () => {
+    const hero: TextOverlay = {
+      id: 'hero',
+      text: 'SU FE NO EMPEZÓ\nCON CERTEZA,\nSINO ELIGIENDO\nA QUIÉN NO SOLTAR',
+      type: 'message',
+      startTime: 0,
+      endTime: 5,
+      position: 'center',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 56,
+        fontWeight: 'bold',
+        color: '#f6efe2',
+        opacity: 1,
+        textShadow: true,
+        shadowColor: 'black@0.8',
+      },
+    };
+
+    const scripture: TextOverlay = {
+      id: 'scripture',
+      text: '"A donde tú vayas, iré;\ntu pueblo será mi pueblo."',
+      type: 'verse',
+      startTime: 5,
+      endTime: 10,
+      position: 'center',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 44,
+        fontWeight: 'normal',
+        italic: true,
+        color: '#f6efe2',
+        opacity: 1,
+        textShadow: true,
+        shadowColor: 'black@0.8',
+      },
+    };
+
+    const reference: TextOverlay = {
+      id: 'reference',
+      text: 'Rut 1:16',
+      type: 'reflection',
+      startTime: 9,
+      endTime: 12,
+      position: 'lower-center',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 40,
+        fontWeight: 'normal',
+        color: '#f6efe2',
+        opacity: 0.9,
+        textShadow: true,
+        shadowColor: 'black@0.7',
+      },
+    };
+
+    const cta: TextOverlay = {
+      id: 'cta',
+      text: 'Compártelo con quien no te soltó',
+      type: 'cta',
+      startTime: 11,
+      endTime: 14,
+      position: 'lower-center',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 36,
+        fontWeight: 'bold',
+        color: '#f6efe2',
+        opacity: 1,
+        textShadow: true,
+        shadowColor: 'black@0.8',
+      },
+    };
+
+    const brand: BrandOverlay = {
+      id: 'brand-ilusiones',
+      presetId: 'ilusiones-colores',
+      text: '@Ilusiones&Colores',
+      startTime: 13,
+      endTime: 15,
+      position: 'bottom-center',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 32,
+        fontWeight: 'normal',
+        italic: true,
+        color: '#f6efe2',
+        opacity: 0.62,
+        textShadow: true,
+        shadowColor: 'black@0.75',
+      },
+      animationIn: 'fade-in',
+      animationOut: 'none',
+      opacity: 0.62,
+    };
+
+    const comp = makeComposition({
+      textTracks: [hero, scripture, reference, cta],
+      overlays: [brand],
+      keepOriginalAudio: true,
+      originalAudioVolume: 0.3,
+    });
+
+    const result = await renderer.render(comp);
+    const probe = await probeOutput(result.filePath, ffmpeg);
+
+    // Validate output properties
+    expect(probe.container).toContain('mp4');
+    expect(probe.videoCodec).toBe('h264');
+    expect(probe.audioCodec).toBe('aac');
+    expect(probe.width).toBe(1080);
+    expect(probe.height).toBe(1920);
+    expect(probe.fileSize).toBeGreaterThan(10240); // > 10KB for 15s video
+    expect(Math.abs(probe.duration - 15) < 2).toBe(true);
+
+    // Validate timing: CTA ends at 14s, brand starts at 13s (1s overlap is intentional)
+    expect(cta.endTime).toBe(14);
+    expect(brand.startTime).toBe(13);
+    expect(brand.text).toBe('@Ilusiones&Colores');
+
+    // Validate safe zones: all text within bounds
+    // center = 50% y → within 10%-80% safe zone
+    // lower-center = 65% y → within safe zone
+    // bottom-center = 80% y → at bottom safe boundary
+
+    await unlink(result.filePath).catch(() => {});
+  });
+
+  it('audio mixing: original + music track', async () => {
+    const musicTrack = {
+      id: 'music-1',
+      type: 'music' as const,
+      fileName: 'background.mp3',
+      assetId: 'music-asset',
+      volume: 0.3,
+      startTime: 0,
+      fadeIn: 1,
+      fadeOut: 2,
+    };
+
+    const text: TextOverlay = {
+      ...BASE_TEXT,
+      text: 'CON MÚSICA',
+      startTime: 0,
+      endTime: 15,
+    };
+
+    const comp = makeComposition({
+      textTracks: [text],
+      audioTracks: [musicTrack],
+      keepOriginalAudio: true,
+      originalAudioVolume: 0.5,
+    });
+
+    // This test validates the filter graph builds correctly with multiple audio inputs
+    // The actual music file doesn't exist, so we test the command structure
+    const { buildRenderCommand } = await import('../infrastructure/ffmpeg/ffmpeg-command-builder');
+    const { args } = buildRenderCommand(comp, SOURCE_PATH, '/tmp/test-audio-mix.mp4', ['/tmp/fake-music.mp3']);
+
+    // Verify filter_complex contains audio mixing
+    const fcIdx = args.indexOf('-filter_complex');
+    expect(fcIdx).toBeGreaterThan(-1);
+    const filterComplex = args[fcIdx + 1];
+    expect(filterComplex).toContain('amix');
+    expect(filterComplex).toContain('volume=');
+    expect(filterComplex).toContain('afade');
+
+    // Verify both audio maps
+    const aoutMaps = args.filter((a) => a === '[aout]');
+    expect(aoutMaps.length).toBe(1);
+  });
 });

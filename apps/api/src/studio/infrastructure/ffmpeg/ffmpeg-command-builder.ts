@@ -32,6 +32,16 @@ function sanitizeColorForFfmpeg(color: string): string {
   return color;
 }
 
+/**
+ * Extract the primary font name from a CSS font-family string.
+ * Example: 'Georgia, "Times New Roman", serif' → 'Georgia'
+ * FFmpeg drawtext uses the `font` parameter with fontconfig resolution.
+ */
+function resolveFontName(fontFamily: string): string {
+  const first = fontFamily.split(',')[0]?.trim() ?? 'Sans';
+  return first.replace(/^["']|["']$/g, '');
+}
+
 export function buildRenderCommand(
   composition: VideoComposition,
   sourcePath: string,
@@ -232,7 +242,7 @@ function buildTextOverlayFilters(
   const fadeOutDuration = fadeOut !== 'none' ? 0.4 : 0;
 
   if (animation === 'none' && fadeOut === 'none') {
-    filters.push(`${inputLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
+    filters.push(`${inputLabel}drawtext=text='${escaped}':font=${resolveFontName(text.style.fontFamily)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
   } else {
     const phases = buildTextPhases(text.startTime, text.endTime, text.style.opacity, fadeInDuration, fadeOutDuration);
     let currentLabel = inputLabel;
@@ -243,7 +253,7 @@ function buildTextOverlayFilters(
         : basePos;
       const isLast = i === phases.length - 1;
       const outLabel = isLast ? `[t${overlayIndex}]` : `[tp${overlayIndex}_${i}]`;
-      filters.push(`${currentLabel}drawtext=text='${escaped}':fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
+      filters.push(`${currentLabel}drawtext=text='${escaped}':font=${resolveFontName(text.style.fontFamily)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
       currentLabel = outLabel;
     }
   }
@@ -325,6 +335,7 @@ function buildBrandOverlayFilters(
     const outLabel = isLast ? `[b${overlayIndex}]` : `[bp${overlayIndex}_${i}]`;
     const drawtext = [
       `${currentLabel}drawtext=text='${escaped}'`,
+      `font=${resolveFontName(brand.style.fontFamily)}`,
       `fontsize=${brand.style.fontSize}`,
       `fontcolor=${sanitizeColorForFfmpeg(brand.style.color)}@${phase.opacity}`,
       `x=${pos.x}`,
