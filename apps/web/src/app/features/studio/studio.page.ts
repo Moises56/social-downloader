@@ -8,7 +8,7 @@ import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
 import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset, VideoFitMode } from '@social-downloader/contracts';
-import type { NormalizedPosition } from './editor/position';
+import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
 
 @Component({
   selector: 'app-studio-page',
@@ -213,6 +213,19 @@ import type { NormalizedPosition } from './editor/position';
                       </button>
                     }
                   </div>
+                  @if (store.selectedPreset()) {
+                    <div class="align-row">
+                      <button class="align-btn" title="Centrar horizontal" (click)="centerBrandHorizontal()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="2" x2="12" y2="22" stroke-dasharray="2.5 2.5"/><rect x="7" y="9" width="10" height="6" rx="1.5"/></svg>
+                      </button>
+                      <button class="align-btn" title="Centrar vertical" (click)="centerBrandVertical()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="2" y1="12" x2="22" y2="12" stroke-dasharray="2.5 2.5"/><rect x="9" y="7" width="6" height="10" rx="1.5"/></svg>
+                      </button>
+                      <button class="align-btn" title="Centrar ambos" (click)="centerBrandBoth()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="2" x2="12" y2="22" stroke-dasharray="2.5 2.5"/><line x1="2" y1="12" x2="22" y2="12" stroke-dasharray="2.5 2.5"/><circle cx="12" cy="12" r="3.5"/></svg>
+                      </button>
+                    </div>
+                  }
                 </div>
                 <div class="prop-section">
                   <h4 class="prop-label">M&uacute;sica</h4>
@@ -551,6 +564,15 @@ import type { NormalizedPosition } from './editor/position';
     .brand-btn.active {
       background: var(--color-accent); color: #fff; border-color: var(--color-accent);
     }
+    .align-row { display: flex; gap: 4px; }
+    .align-btn {
+      flex: 1; padding: 6px; border: 1px solid var(--color-border); border-radius: 6px;
+      background: var(--color-bg); color: var(--color-text-secondary);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .align-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+    .align-btn svg { width: 16px; height: 16px; }
     .brand-preview {
       display: flex; align-items: center; gap: 10px;
       padding: 8px 12px; background: var(--color-bg);
@@ -848,6 +870,27 @@ export class StudioPageComponent {
     } else {
       this.store.updateBrandOverlayPosition(event.position);
     }
+  }
+
+  private currentBrandPosition(): NormalizedPosition {
+    const brand = this.store.brandOverlays()[0];
+    if (brand?.customPosition) return brand.customPosition;
+    if (brand?.position) return POSITION_PRESETS[brand.position] ?? { x: 0.5, y: 0.5 };
+    return { x: 0.5, y: 0.5 };
+  }
+
+  centerBrandHorizontal(): void {
+    const { y } = this.currentBrandPosition();
+    this.store.updateBrandOverlayPosition({ x: 0.5, y });
+  }
+
+  centerBrandVertical(): void {
+    const { x } = this.currentBrandPosition();
+    this.store.updateBrandOverlayPosition({ x, y: 0.5 });
+  }
+
+  centerBrandBoth(): void {
+    this.store.updateBrandOverlayPosition({ x: 0.5, y: 0.5 });
   }
 
   onDrop(event: DragEvent): void {

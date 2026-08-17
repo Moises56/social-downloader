@@ -162,13 +162,19 @@ interface DragState {
     .snap-guide {
       position: absolute; pointer-events: none; z-index: 200;
       background: var(--color-accent, #6366f1);
-      opacity: 0.6;
+      box-shadow: 0 0 4px 0 var(--color-accent-glow, rgba(99, 102, 241, 0.5));
+      opacity: 0;
+      animation: guide-in 0.12s ease-out forwards;
     }
     .snap-guide.guide-h {
       left: 0; right: 0; height: 1px;
     }
     .snap-guide.guide-v {
       top: 0; bottom: 0; width: 1px;
+    }
+    @keyframes guide-in {
+      from { opacity: 0; }
+      to { opacity: 0.7; }
     }
 
     .preview-controls {

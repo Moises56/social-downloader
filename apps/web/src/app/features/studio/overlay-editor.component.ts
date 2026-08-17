@@ -2,6 +2,7 @@ import { Component, input, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type { TextOverlay, OverlayPosition } from '@social-downloader/contracts';
+import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
 
 @Component({
   selector: 'app-overlay-editor',
@@ -50,6 +51,17 @@ import type { TextOverlay, OverlayPosition } from '@social-downloader/contracts'
                   {{ pos.icon }}
                 </button>
               }
+            </div>
+            <div class="align-row">
+              <button class="align-btn" title="Centrar horizontal" (click)="centerHorizontal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="2" x2="12" y2="22" stroke-dasharray="2.5 2.5"/><rect x="7" y="9" width="10" height="6" rx="1.5"/></svg>
+              </button>
+              <button class="align-btn" title="Centrar vertical" (click)="centerVertical()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="2" y1="12" x2="22" y2="12" stroke-dasharray="2.5 2.5"/><rect x="9" y="7" width="6" height="10" rx="1.5"/></svg>
+              </button>
+              <button class="align-btn" title="Centrar ambos" (click)="centerBoth()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="2" x2="12" y2="22" stroke-dasharray="2.5 2.5"/><line x1="2" y1="12" x2="22" y2="12" stroke-dasharray="2.5 2.5"/><circle cx="12" cy="12" r="3.5"/></svg>
+              </button>
             </div>
           </div>
 
@@ -161,6 +173,15 @@ import type { TextOverlay, OverlayPosition } from '@social-downloader/contracts'
     }
     .pos-btn:hover { border-color: var(--color-accent); }
     .pos-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+    .align-row { display: flex; gap: 4px; margin-top: 6px; }
+    .align-btn {
+      flex: 1; padding: 6px; border: 1px solid var(--color-border); border-radius: 6px;
+      background: var(--color-bg); color: var(--color-text-secondary);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all var(--transition-fast);
+    }
+    .align-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+    .align-btn svg { width: 16px; height: 16px; }
     .range-input { width: 100%; accent-color: var(--color-accent); }
     .range-val { font-size: 11px; color: var(--color-text-muted); text-align: right; font-variant-numeric: tabular-nums; }
     .color-row { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -231,5 +252,29 @@ export class OverlayEditorComponent {
 
   onMaxWidthChange(value: string): void {
     this.maxWidthOption.set(value);
+  }
+
+  private currentPosition(ov: TextOverlay): NormalizedPosition {
+    return ov.customPosition ?? POSITION_PRESETS[ov.position] ?? { x: 0.5, y: 0.5 };
+  }
+
+  centerHorizontal(): void {
+    const ov = this.overlay();
+    if (!ov) return;
+    const { y } = this.currentPosition(ov);
+    this.overlayUpdate.emit({ id: ov.id, changes: { position: 'custom', customPosition: { x: 0.5, y } } });
+  }
+
+  centerVertical(): void {
+    const ov = this.overlay();
+    if (!ov) return;
+    const { x } = this.currentPosition(ov);
+    this.overlayUpdate.emit({ id: ov.id, changes: { position: 'custom', customPosition: { x, y: 0.5 } } });
+  }
+
+  centerBoth(): void {
+    const ov = this.overlay();
+    if (!ov) return;
+    this.overlayUpdate.emit({ id: ov.id, changes: { position: 'custom', customPosition: { x: 0.5, y: 0.5 } } });
   }
 }

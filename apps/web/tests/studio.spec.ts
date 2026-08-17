@@ -251,4 +251,94 @@ test.describe('Studio', () => {
       expect(href).toContain('/download');
     });
   });
+
+  // Drags the first [data-overlay-id] overlay by dispatching real PointerEvents
+  // (pointerdown → pointermove → pointerup) — the component listens for Pointer
+  // Events specifically, and Playwright's page.mouse helper does not reliably
+  // reproduce the same event sequence for transform-positioned elements, so we
+  // drive it directly the same way a real pointer/touch input would.
+  const dragFirstOverlayTo = (page: Page, targetXFrac: number, targetYFrac?: number) =>
+    page.evaluate(({ txf, tyf }) => {
+      const el = document.querySelector('[data-overlay-id]') as HTMLElement;
+      const vp = document.querySelector('.preview-viewport') as HTMLElement;
+      const b = el.getBoundingClientRect();
+      const v = vp.getBoundingClientRect();
+      const startX = b.x + b.width / 2;
+      const startY = b.y + b.height / 2;
+      const targetX = v.x + txf * v.width;
+      const targetY = tyf === undefined ? startY : v.y + tyf * v.height;
+
+      function fire(target: EventTarget, type: string, x: number, y: number) {
+        target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, composed: true,
+          pointerId: 1, isPrimary: true, pointerType: 'mouse',
+          clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1,
+        }));
+      }
+
+      fire(el, 'pointerdown', startX, startY);
+      fire(window, 'pointermove', targetX, targetY);
+      const guideDuringDrag = Array.from(document.querySelectorAll('.snap-guide')).map((g) => g.className);
+      fire(window, 'pointerup', targetX, targetY);
+      const finalRect = el.getBoundingClientRect();
+      return {
+        guideDuringDrag,
+        guideAfterDrop: document.querySelectorAll('.snap-guide').length,
+        finalNormX: (finalRect.x + finalRect.width / 2 - v.x) / v.width,
+        finalNormY: (finalRect.y + finalRect.height / 2 - v.y) / v.height,
+      };
+    }, { txf: targetXFrac, tyf: targetYFrac });
+
+  test.describe('Alignment & Snap Guides', () => {
+    // "SU FE NO EMPEZÓ CON CERTEZA" — the Hero overlay from the manual test case.
+    test('dragging the Hero overlay near center shows a snap guide and settles near center', async ({ page }: { page: Page }) => {
+      test.setTimeout(30000);
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await page.locator('.topbar-chip:has-text("Devotional")').first().click();
+      await expect(page.locator('[data-overlay-id]')).toBeVisible({ timeout: 5000 });
+
+      // Land just inside the snap threshold of horizontal center (x=0.5).
+      const result = await dragFirstOverlayTo(page, 0.49);
+
+      expect(result.guideDuringDrag.some((c) => c.includes('guide-v'))).toBe(true);
+      expect(result.guideAfterDrop).toBe(0); // guide clears once the drag ends
+      expect(Math.abs(result.finalNormX - 0.5)).toBeLessThan(0.03);
+    });
+
+    test('moving far from center never triggers a snap guide', async ({ page }: { page: Page }) => {
+      test.setTimeout(30000);
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await page.locator('.topbar-chip:has-text("Devotional")').first().click();
+      await expect(page.locator('[data-overlay-id]')).toBeVisible({ timeout: 5000 });
+
+      // Well outside the snap threshold — no guide should ever appear.
+      const result = await dragFirstOverlayTo(page, 0.2);
+
+      expect(result.guideDuringDrag.some((c) => c.includes('guide-v'))).toBe(false);
+      expect(Math.abs(result.finalNormX - 0.2)).toBeLessThan(0.03);
+    });
+
+    test('Centrar ambos aligns the selected overlay to x=0.5, y=0.5', async ({ page }: { page: Page }) => {
+      test.setTimeout(30000);
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await page.locator('.topbar-chip:has-text("Devotional")').first().click();
+
+      const hero = page.locator('[data-overlay-id]').first();
+      const viewport = page.locator('.preview-viewport');
+      await expect(hero).toBeVisible({ timeout: 5000 });
+      await hero.click();
+
+      await page.locator('.align-btn[title="Centrar ambos"]').click();
+
+      const vBox = (await viewport.boundingBox())!;
+      const hBox = (await hero.boundingBox())!;
+      const normX = (hBox.x + hBox.width / 2 - vBox.x) / vBox.width;
+      const normY = (hBox.y + hBox.height / 2 - vBox.y) / vBox.height;
+      expect(Math.abs(normX - 0.5)).toBeLessThan(0.03);
+      expect(Math.abs(normY - 0.5)).toBeLessThan(0.03);
+    });
+  });
 });
