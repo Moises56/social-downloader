@@ -197,6 +197,9 @@ export class StudioController {
       const brandOverlays = this.brandPresets.createBrandOverlay(
         composition.brandPresetId,
         duration,
+        undefined,
+        undefined,
+        body.brandCustomPosition,
       );
       composition.overlays = [...composition.overlays, ...brandOverlays];
     }

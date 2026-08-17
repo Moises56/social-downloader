@@ -59,6 +59,7 @@ export class StudioApiService {
     audioTracks?: AudioTrack[];
     keepOriginalAudio?: boolean;
     originalAudioVolume?: number;
+    brandCustomPosition?: { x: number; y: number };
   }): Observable<CreateCompositionResponse> {
     return this.http.post<CreateCompositionResponse>(
       `${this.baseUrl}/compositions`,

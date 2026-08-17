@@ -1,11 +1,39 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { Injector, runInInjectionContext, ɵChangeDetectionScheduler, ɵEffectScheduler } from '@angular/core';
 import { StudioStore } from './studio.store';
+
+// This spec runs under vitest's default 'node' environment (no jsdom), which has no
+// `localStorage` global — StudioStore.reset()/clearAutosave() touch it directly.
+// A minimal in-memory stub is enough; we're not asserting on persisted content here.
+if (typeof globalThis.localStorage === 'undefined') {
+  const memory = new Map<string, string>();
+  globalThis.localStorage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => void memory.set(key, value),
+    removeItem: (key: string) => void memory.delete(key),
+    clear: () => memory.clear(),
+    key: (index: number) => Array.from(memory.keys())[index] ?? null,
+    get length() { return memory.size; },
+  } as Storage;
+}
 
 describe('StudioStore', () => {
   let store: StudioStore;
 
   beforeEach(() => {
-    store = new StudioStore();
+    // StudioStore's constructor registers an autosave effect(), which requires an
+    // Angular injection context (plus a change-detection scheduler and an effect
+    // scheduler) to construct. This is a plain unit test with no component tree and no
+    // assertions on the debounced autosave side effect, so no-op stubs are enough — we
+    // only care that signal writes/reads work, not that a view re-renders or the effect
+    // actually fires.
+    const injector = Injector.create({
+      providers: [
+        { provide: ɵChangeDetectionScheduler, useValue: { notify: () => {}, runningTick: false } },
+        { provide: ɵEffectScheduler, useValue: { add: () => {}, schedule: () => {} } },
+      ],
+    });
+    store = runInInjectionContext(injector, () => new StudioStore());
   });
 
   it('starts with empty state', () => {

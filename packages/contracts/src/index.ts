@@ -237,6 +237,7 @@ export interface BrandOverlay {
   startTime: number;
   endTime: number;
   position: OverlayPosition;
+  customPosition?: { x: number; y: number };
   style: TextStyleConfig;
   animationIn?: OverlayAnimation;
   animationOut?: OverlayAnimation;
@@ -309,6 +310,7 @@ export interface CreateCompositionRequest {
   audioTracks?: AudioTrack[];
   keepOriginalAudio?: boolean;
   originalAudioVolume?: number;
+  brandCustomPosition?: { x: number; y: number };
 }
 
 export interface CreateCompositionResponse {

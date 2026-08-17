@@ -11,6 +11,7 @@ import type {
   VideoFitConfig,
   ValidationWarning,
 } from '@social-downloader/contracts';
+import type { NormalizedPosition } from '../editor/position';
 
 export interface StudioAsset {
   id: string;
@@ -35,6 +36,7 @@ interface AutosaveData {
   keepOriginalAudio: boolean;
   originalAudioVolume: number;
   showSafeZones: boolean;
+  brandCustomPosition: NormalizedPosition | null;
   savedAt: number;
 }
 
@@ -49,11 +51,12 @@ export class StudioStore {
   readonly textOverlays = signal<TextOverlay[]>([]);
   readonly audioTracks = signal<AudioTrack[]>([]);
   readonly composition = signal<VideoComposition | null>(null);
-  readonly renderState = signal<'idle' | 'rendering' | 'success' | 'error'>('idle');
+  readonly renderState = signal<'idle' | 'rendering' | 'success' | 'error' | 'cancelled'>('idle');
   readonly renderResult = signal<RenderedVideo | null>(null);
   readonly renderProgress = signal<number>(0);
   readonly currentTime = signal<number>(0);
   readonly showSafeZones = signal<boolean>(false);
+  readonly brandCustomPosition = signal<NormalizedPosition | null>(null);
   readonly savedPresets = signal<SavedCompositionPreset[]>([]);
   readonly brandPresetId = signal<string | null>(null);
   readonly selectedExportPreset = signal<ExportPreset | null>(null);
@@ -100,6 +103,8 @@ export class StudioStore {
       textShadow: true,
       shadowColor: 'rgba(0, 0, 0, 0.75)',
     };
+    const customPosition = this.brandCustomPosition();
+    const position = customPosition ? ('custom' as const) : preset.signature.defaultPosition;
 
     if (mode === 'ending') {
       return [{
@@ -108,7 +113,8 @@ export class StudioStore {
         text: preset.signature.text,
         startTime: Math.max(0, duration - 2.5),
         endTime: duration,
-        position: preset.signature.defaultPosition,
+        position,
+        customPosition: customPosition ?? undefined,
         style,
         opacity: style.opacity,
       }];
@@ -120,7 +126,8 @@ export class StudioStore {
         text: preset.signature.text,
         startTime: 0.5,
         endTime: duration - 0.5,
-        position: preset.signature.defaultPosition,
+        position,
+        customPosition: customPosition ?? undefined,
         style,
         opacity: style.opacity,
       }];
@@ -139,6 +146,7 @@ export class StudioStore {
       const _overlays = this.textOverlays();
       const _audio = this.audioTracks();
       const _composition = this.composition();
+      const _brandPosition = this.brandCustomPosition();
 
       if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
       this.autosaveTimer = setTimeout(() => {
@@ -157,6 +165,7 @@ export class StudioStore {
 
   setPreset(preset: BrandPreset | null): void {
     this.selectedPreset.set(preset);
+    this.brandCustomPosition.set(null);
   }
 
   setExportPreset(preset: ExportPreset | null): void {
@@ -181,6 +190,10 @@ export class StudioStore {
     );
   }
 
+  updateBrandOverlayPosition(position: NormalizedPosition): void {
+    this.brandCustomPosition.set(position);
+  }
+
   addAudioTrack(track: AudioTrack): void {
     this.audioTracks.update((tracks) => [...tracks, track]);
   }
@@ -199,7 +212,7 @@ export class StudioStore {
     this.composition.set(composition);
   }
 
-  setRenderState(state: 'idle' | 'rendering' | 'success' | 'error'): void {
+  setRenderState(state: 'idle' | 'rendering' | 'success' | 'error' | 'cancelled'): void {
     this.renderState.set(state);
   }
 
@@ -239,6 +252,7 @@ export class StudioStore {
       keepOriginalAudio: true,
       originalAudioVolume: 1.0,
       showSafeZones: this.showSafeZones(),
+      brandCustomPosition: this.brandCustomPosition(),
       savedAt: Date.now(),
     };
 
@@ -268,6 +282,7 @@ export class StudioStore {
       this.videoFitMode.set(data.videoFitMode);
       this.videoFitBackgroundColor.set(data.videoFitBackgroundColor);
       this.showSafeZones.set(data.showSafeZones);
+      if (data.brandCustomPosition) this.brandCustomPosition.set(data.brandCustomPosition);
 
       return data;
     } catch {
@@ -289,6 +304,7 @@ export class StudioStore {
     this.selectedPreset.set(null);
     this.textOverlays.set([]);
     this.audioTracks.set([]);
+    this.brandCustomPosition.set(null);
     this.composition.set(null);
     this.renderState.set('idle');
     this.renderResult.set(null);

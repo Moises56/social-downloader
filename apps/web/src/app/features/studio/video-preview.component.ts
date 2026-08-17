@@ -1,6 +1,22 @@
-import { Component, ElementRef, inject, input, OnDestroy, output, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, inject, input, OnDestroy, output, signal, viewChild, afterNextRender, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
+import {
+  NormalizedPosition,
+  POSITION_PRESETS,
+  clampPosition,
+  normalizedToPixels,
+  snapAxis,
+  computeSnapPoints,
+} from './editor/position';
+
+interface DragState {
+  overlayId: string;
+  overlayType: 'text' | 'brand';
+  startNormalized: NormalizedPosition;
+  startPointerX: number;
+  startPointerY: number;
+}
 
 @Component({
   selector: 'app-video-preview',
@@ -8,7 +24,8 @@ import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
   imports: [CommonModule],
   template: `
     <div class="preview-wrapper">
-      <div class="preview-viewport" #viewport>
+      <div class="preview-viewport" #viewport
+        (pointerdown)="onViewportPointerDown($event)">
         <video
           #videoEl
           [src]="src()"
@@ -26,37 +43,34 @@ import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
           @for (overlay of visibleTextOverlays(); track overlay.id) {
             <div
               class="text-overlay"
-              [class]="'pos-' + overlay.position"
-              [style.fontFamily]="overlay.style.fontFamily"
-              [style.fontSize.px]="scaleFontSize(overlay.style.fontSize)"
-              [style.fontWeight]="overlay.style.fontWeight"
-              [style.fontStyle]="overlay.style.italic ? 'italic' : 'normal'"
-              [style.color]="overlay.style.color"
-              [style.opacity]="overlay.style.opacity"
-              [style.textShadow]="overlay.style.textShadow ? '2px 2px 8px ' + (overlay.style.shadowColor ?? 'rgba(0,0,0,0.8)') : 'none'"
-              [style.letterSpacing.rem]="overlay.style.letterSpacing ?? 0"
-              [style.maxWidth.%]="85"
-              [style.textAlign]="'center'"
-              [style.whiteSpace]="'pre-line'"
-              [style.lineHeight]="1.3">
-              {{ overlay.text }}
+              [class.draggable]="true"
+              [class.selected]="selectedOverlayId() === overlay.id"
+              [class.dragging]="dragging() && dragging()!.overlayId === overlay.id"
+              [style]="getOverlayStyle(overlay)"
+              [attr.data-overlay-id]="overlay.id"
+              (pointerdown)="onOverlayPointerDown($event, overlay.id, 'text')"
+              (dblclick)="onOverlayDoubleClick($event, overlay.id)">
+              <span class="overlay-text">{{ overlay.text }}</span>
+              @if (selectedOverlayId() === overlay.id) {
+                <div class="selection-border"></div>
+              }
             </div>
           }
 
           @for (brand of visibleBrandOverlays(); track brand.id) {
             <div
               class="brand-overlay"
-              [class]="'pos-' + brand.position"
-              [style.fontFamily]="brand.style.fontFamily"
-              [style.fontSize.px]="scaleFontSize(brand.style.fontSize)"
-              [style.fontWeight]="brand.style.fontWeight"
-              [style.fontStyle]="brand.style.italic ? 'italic' : 'normal'"
-              [style.color]="brand.style.color"
-              [style.opacity]="brand.style.opacity"
-              [style.textShadow]="brand.style.textShadow ? '0 2px 8px ' + (brand.style.shadowColor ?? 'rgba(0,0,0,0.75)') : 'none'"
-              [style.letterSpacing.rem]="brand.style.letterSpacing ?? 0"
-              [style.whiteSpace]="'nowrap'">
-              {{ brand.text }}
+              [class.draggable]="true"
+              [class.selected]="selectedOverlayId() === brand.id"
+              [class.dragging]="dragging() && dragging()!.overlayId === brand.id"
+              [style]="getBrandOverlayStyle(brand)"
+              [attr.data-overlay-id]="brand.id"
+              (pointerdown)="onOverlayPointerDown($event, brand.id, 'brand')"
+              (dblclick)="onOverlayDoubleClick($event, brand.id)">
+              <span class="overlay-text">{{ brand.text }}</span>
+              @if (selectedOverlayId() === brand.id) {
+                <div class="selection-border"></div>
+              }
             </div>
           }
 
@@ -64,12 +78,19 @@ import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
             <div class="safe-zone safe-zone-top"></div>
             <div class="safe-zone safe-zone-bottom"></div>
             <div class="safe-zone safe-zone-right"></div>
+            <div class="safe-zone safe-zone-left"></div>
+          }
+
+          @if (dragging()) {
+            @for (guide of activeGuides(); track guide) {
+              <div class="snap-guide" [class.guide-h]="guide.axis === 'horizontal'" [class.guide-v]="guide.axis === 'vertical'" [style]="guide.style"></div>
+            }
           }
         </div>
       </div>
 
       <div class="preview-controls">
-        <button class="control-btn" (click)="togglePlay()">
+        <button class="control-btn" (click)="togglePlay(); $event.stopPropagation()">
           {{ playing() ? '&#9646;&#9646;' : '&#9654;' }}
         </button>
         <span class="time-display">{{ formatTime(currentTime()) }} / {{ formatTime(duration()) }}</span>
@@ -89,33 +110,66 @@ import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
     .preview-viewport {
       position: relative; width: 100%; aspect-ratio: 9/16;
       background: #000; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-      overflow: hidden;
+      overflow: hidden; touch-action: none;
     }
-    .preview-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .preview-video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
     .overlays-layer {
       position: absolute; inset: 0; pointer-events: none;
-      display: flex; flex-direction: column; justify-content: center; align-items: center;
     }
+
     .text-overlay, .brand-overlay {
-      position: absolute; padding: 0 24px; transition: opacity 0.15s ease;
+      position: absolute; padding: 4px 8px;
+      transition: opacity 0.15s ease;
+      pointer-events: auto;
+      cursor: grab;
+      user-select: none;
+      max-width: 85%;
+      text-align: center;
+      white-space: pre-line;
+      line-height: 1.3;
     }
-    .pos-top-center { top: 10%; left: 50%; transform: translateX(-50%); }
-    .pos-top-left { top: 10%; left: 8%; }
-    .pos-top-right { top: 10%; right: 8%; }
-    .pos-center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-    .pos-upper-center { top: 30%; left: 50%; transform: translateX(-50%); }
-    .pos-lower-center { top: 65%; left: 50%; transform: translateX(-50%); }
-    .pos-bottom-center { bottom: 12%; left: 50%; transform: translateX(-50%); }
-    .pos-bottom-left { bottom: 12%; left: 8%; }
-    .pos-bottom-right { bottom: 12%; right: 8%; }
+    .text-overlay.dragging, .brand-overlay.dragging {
+      cursor: grabbing;
+      z-index: 100;
+    }
+    .text-overlay.selected, .brand-overlay.selected {
+      z-index: 50;
+    }
+
+    .selection-border {
+      position: absolute; inset: -3px;
+      border: 1.5px solid var(--color-accent, #6366f1);
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0.8;
+    }
+
+    .overlay-text {
+      position: relative;
+      z-index: 1;
+    }
 
     .safe-zone {
       position: absolute; left: 0; right: 0;
       border: 1px dashed rgba(255, 255, 0, 0.35);
+      pointer-events: none;
     }
     .safe-zone-top { top: 10%; height: 0; }
     .safe-zone-bottom { bottom: 20%; height: 0; }
     .safe-zone-right { right: 5%; top: 10%; bottom: 20%; width: 0; border-left: 1px dashed rgba(255, 255, 0, 0.35); border-top: none; border-right: none; border-bottom: none; }
+    .safe-zone-left { left: 5%; top: 10%; bottom: 20%; width: 0; border-left: 1px dashed rgba(255, 255, 0, 0.35); border-top: none; border-right: none; border-bottom: none; }
+
+    .snap-guide {
+      position: absolute; pointer-events: none; z-index: 200;
+      background: var(--color-accent, #6366f1);
+      opacity: 0.6;
+    }
+    .snap-guide.guide-h {
+      left: 0; right: 0; height: 1px;
+    }
+    .snap-guide.guide-v {
+      top: 0; bottom: 0; width: 1px;
+    }
 
     .preview-controls {
       display: flex; align-items: center; gap: 12px;
@@ -145,16 +199,96 @@ export class VideoPreviewComponent implements OnDestroy {
   readonly brandOverlays = input<BrandOverlay[]>([]);
   readonly duration = input<number>(0);
   readonly showSafeZones = input<boolean>(false);
+  readonly selectedOverlayId = input<string | null>(null);
 
   readonly timeChange = output<number>();
+  readonly overlaySelect = output<string | null>();
+  readonly overlayPositionChange = output<{ id: string; type: 'text' | 'brand'; position: NormalizedPosition }>();
 
   readonly videoEl = viewChild.required<ElementRef<HTMLVideoElement>>('videoEl');
   readonly viewport = viewChild.required<ElementRef<HTMLDivElement>>('viewport');
 
   readonly playing = signal(false);
   readonly currentTime = signal(0);
+  readonly dragging = signal<DragState | null>(null);
+  readonly activeGuides = signal<Array<{ axis: 'horizontal' | 'vertical'; style: string }>>([]);
 
   private previewScale = 1;
+  private dragCurrent = signal<NormalizedPosition>({ x: 0, y: 0 });
+  private snapPoints = computeSnapPoints();
+
+  constructor() {
+    afterNextRender(() => {
+      this.updateScale();
+    });
+  }
+
+  @HostListener('window:pointermove', ['$event'])
+  onPointerMove(event: PointerEvent): void {
+    const state = this.dragging();
+    if (!state) return;
+
+    const vp = this.viewport()?.nativeElement;
+    if (!vp) return;
+
+    const rect = vp.getBoundingClientRect();
+    const dx = (event.clientX - state.startPointerX) / rect.width;
+    const dy = (event.clientY - state.startPointerY) / rect.height;
+
+    let newPos: NormalizedPosition = {
+      x: state.startNormalized.x + dx,
+      y: state.startNormalized.y + dy,
+    };
+
+    newPos = clampPosition(newPos);
+
+    // Skip snapping while Option/Alt is held, so users can fine-tune a position
+    // without the guides pulling it back.
+    const snapX = event.altKey ? { value: newPos.x, snapped: false } : snapAxis(newPos.x, this.snapPoints.vertical);
+    const snapY = event.altKey ? { value: newPos.y, snapped: false } : snapAxis(newPos.y, this.snapPoints.horizontal);
+    newPos = { x: snapX.value, y: snapY.value };
+
+    this.dragCurrent.set(newPos);
+
+    const guides: Array<{ axis: 'horizontal' | 'vertical'; style: string }> = [];
+    if (snapX.snapped) {
+      guides.push({
+        axis: 'vertical',
+        style: `left: ${newPos.x * 100}%; top: 0; bottom: 0;`,
+      });
+    }
+    if (snapY.snapped) {
+      guides.push({
+        axis: 'horizontal',
+        style: `top: ${newPos.y * 100}%; left: 0; right: 0;`,
+      });
+    }
+    this.activeGuides.set(guides);
+  }
+
+  @HostListener('window:pointerup')
+  onPointerUp(): void {
+    const state = this.dragging();
+    if (!state) return;
+
+    const finalPos = this.dragCurrent();
+    this.overlayPositionChange.emit({
+      id: state.overlayId,
+      type: state.overlayType,
+      position: finalPos,
+    });
+
+    this.dragging.set(null);
+    this.activeGuides.set([]);
+  }
+
+  @HostListener('window:pointercancel')
+  onPointerCancel(): void {
+    // Drag was interrupted (e.g. an OS/browser gesture took over the pointer) — discard
+    // it without committing a position, so the overlay reverts to where it started.
+    this.dragging.set(null);
+    this.activeGuides.set([]);
+  }
 
   onTimeUpdate(event: Event): void {
     const video = event.target as HTMLVideoElement;
@@ -162,8 +296,7 @@ export class VideoPreviewComponent implements OnDestroy {
     this.timeChange.emit(video.currentTime);
   }
 
-  onMetadataLoaded(event: Event): void {
-    const video = event.target as HTMLVideoElement;
+  onMetadataLoaded(_event: Event): void {
     this.updateScale();
   }
 
@@ -183,6 +316,50 @@ export class VideoPreviewComponent implements OnDestroy {
     }
   }
 
+  onViewportPointerDown(event: PointerEvent): void {
+    if ((event.target as HTMLElement).closest('.text-overlay, .brand-overlay')) return;
+    this.overlaySelect.emit(null);
+  }
+
+  onOverlayPointerDown(event: PointerEvent, overlayId: string, type: 'text' | 'brand'): void {
+    event.stopPropagation();
+    event.preventDefault();
+
+    this.overlaySelect.emit(overlayId);
+
+    const vp = this.viewport()?.nativeElement;
+    if (!vp) return;
+
+    const overlay = type === 'text'
+      ? this.textOverlays().find(o => o.id === overlayId)
+      : this.brandOverlays().find(o => o.id === overlayId);
+
+    let startNormalized: NormalizedPosition;
+    if (overlay && 'customPosition' in overlay && overlay.customPosition) {
+      startNormalized = overlay.customPosition;
+    } else if (overlay && 'position' in overlay) {
+      const posStr = overlay.position as string;
+      startNormalized = POSITION_PRESETS[posStr] ?? { x: 0.5, y: 0.5 };
+    } else {
+      startNormalized = { x: 0.5, y: 0.5 };
+    }
+
+    this.dragging.set({
+      overlayId,
+      overlayType: type,
+      startNormalized,
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+    });
+    this.dragCurrent.set(startNormalized);
+
+    (event.target as HTMLElement)?.setPointerCapture?.(event.pointerId);
+  }
+
+  onOverlayDoubleClick(event: Event, overlayId: string): void {
+    event.stopPropagation();
+  }
+
   visibleTextOverlays(): TextOverlay[] {
     const t = this.currentTime();
     return this.textOverlays().filter((o) => t >= o.startTime && t <= o.endTime);
@@ -191,6 +368,73 @@ export class VideoPreviewComponent implements OnDestroy {
   visibleBrandOverlays(): BrandOverlay[] {
     const t = this.currentTime();
     return this.brandOverlays().filter((o) => t >= o.startTime && t <= o.endTime);
+  }
+
+  getOverlayStyle(overlay: TextOverlay): Record<string, string> {
+    const isDragging = this.dragging()?.overlayId === overlay.id;
+    const pos = isDragging ? this.dragCurrent() : this.getOverlayPosition(overlay);
+
+    const vp = this.viewport()?.nativeElement;
+    const vpWidth = vp?.clientWidth ?? 300;
+    const vpHeight = vp?.clientHeight ?? 533;
+    const pixels = normalizedToPixels(pos, vpWidth, vpHeight);
+
+    return {
+      'left': `${pixels.px}px`,
+      'top': `${pixels.py}px`,
+      'transform': 'translate(-50%, -50%)',
+      'fontFamily': overlay.style.fontFamily,
+      'fontSize': `${this.scaleFontSize(overlay.style.fontSize)}px`,
+      'fontWeight': overlay.style.fontWeight ?? 'normal',
+      'fontStyle': overlay.style.italic ? 'italic' : 'normal',
+      'color': overlay.style.color,
+      'opacity': String(overlay.style.opacity),
+      'textShadow': overlay.style.textShadow
+        ? `2px 2px 8px ${overlay.style.shadowColor ?? 'rgba(0,0,0,0.8)'}`
+        : 'none',
+      'letterSpacing': `${overlay.style.letterSpacing ?? 0}rem`,
+    };
+  }
+
+  getBrandOverlayStyle(brand: BrandOverlay): Record<string, string> {
+    const isDragging = this.dragging()?.overlayId === brand.id;
+    const pos = isDragging ? this.dragCurrent() : this.getBrandPosition(brand);
+
+    const vp = this.viewport()?.nativeElement;
+    const vpWidth = vp?.clientWidth ?? 300;
+    const vpHeight = vp?.clientHeight ?? 533;
+    const pixels = normalizedToPixels(pos, vpWidth, vpHeight);
+
+    return {
+      'left': `${pixels.px}px`,
+      'top': `${pixels.py}px`,
+      'transform': 'translate(-50%, -50%)',
+      'fontFamily': brand.style.fontFamily,
+      'fontSize': `${this.scaleFontSize(brand.style.fontSize)}px`,
+      'fontWeight': brand.style.fontWeight ?? 'normal',
+      'fontStyle': brand.style.italic ? 'italic' : 'normal',
+      'color': brand.style.color,
+      'opacity': String(brand.style.opacity),
+      'textShadow': brand.style.textShadow
+        ? `0 2px 8px ${brand.style.shadowColor ?? 'rgba(0,0,0,0.75)'}`
+        : 'none',
+      'letterSpacing': `${brand.style.letterSpacing ?? 0}rem`,
+      'whiteSpace': 'nowrap',
+    };
+  }
+
+  private getOverlayPosition(overlay: TextOverlay): NormalizedPosition {
+    if (overlay.position === 'custom' && overlay.customPosition) {
+      return overlay.customPosition;
+    }
+    return POSITION_PRESETS[overlay.position] ?? { x: 0.5, y: 0.5 };
+  }
+
+  private getBrandPosition(brand: BrandOverlay): NormalizedPosition {
+    if (brand.position === 'custom' && brand.customPosition) {
+      return brand.customPosition;
+    }
+    return POSITION_PRESETS[brand.position] ?? { x: 0.5, y: 0.82 };
   }
 
   scaleFontSize(fontSize: number): number {

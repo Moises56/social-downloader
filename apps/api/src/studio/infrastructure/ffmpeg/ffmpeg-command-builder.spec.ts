@@ -110,4 +110,91 @@ describe('ffmpeg-command-builder', () => {
     const filterStr = args[filterIdx + 1];
     expect(filterStr).toContain('@Ilusiones&Colores');
   });
+
+  it('translates a custom normalized position into a centered drawtext expression', () => {
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-custom',
+          text: 'Custom pos',
+          type: 'message' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'custom' as const,
+          customPosition: { x: 0.9, y: 0.8 },
+          style: {
+            fontFamily: 'Arial',
+            fontSize: 48,
+            color: '#ffffff',
+            opacity: 1,
+          },
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    // x/y represent the overlay center — FFmpeg must offset by half the text box.
+    // width=1080, height=1920 (baseComposition.output): 0.9*1080=972, 0.8*1920=1536.
+    expect(filterStr).toContain('x=972-text_w/2');
+    expect(filterStr).toContain('y=1536-text_h/2');
+  });
+
+  it('applies a custom position to a brand overlay the same way as text overlays', () => {
+    const composition = {
+      ...baseComposition,
+      overlays: [
+        {
+          id: 'brand-custom',
+          presetId: 'ilusiones-colores',
+          text: '@Ilusiones&Colores',
+          startTime: 0,
+          endTime: 5,
+          position: 'custom' as const,
+          customPosition: { x: 0.1, y: 0.5 },
+          style: {
+            fontFamily: 'Georgia',
+            fontSize: 32,
+            color: '#f6efe2',
+            opacity: 0.62,
+          },
+          opacity: 0.62,
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    // width=1080, height=1920: 0.1*1080=108, 0.5*1920=960.
+    expect(filterStr).toContain('x=108-text_w/2');
+    expect(filterStr).toContain('y=960-text_h/2');
+  });
+
+  it('does not produce a NaN y-coordinate for slide-up animation on a custom position', () => {
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-slide',
+          text: 'Sliding',
+          type: 'message' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'custom' as const,
+          customPosition: { x: 0.5, y: 0.5 },
+          style: {
+            fontFamily: 'Arial',
+            fontSize: 48,
+            color: '#ffffff',
+            opacity: 1,
+          },
+          animationIn: 'slide-up' as const,
+          animationOut: 'fade-out' as const,
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    expect(filterStr).not.toContain('NaN');
+    expect(filterStr).toContain('text_h/2');
+  });
 });

@@ -53,4 +53,23 @@ describe('BrandPresetService', () => {
     const overlays = service.createBrandOverlay('unknown', 10);
     expect(overlays).toEqual([]);
   });
+
+  it('overrides the position with a custom normalized coordinate when provided', () => {
+    const overlays = service.createBrandOverlay(
+      'ilusiones-colores',
+      10,
+      'ending',
+      undefined,
+      { x: 0.9, y: 0.82 },
+    );
+    expect(overlays.length).toBe(1);
+    expect(overlays[0].position).toBe('custom');
+    expect(overlays[0].customPosition).toEqual({ x: 0.9, y: 0.82 });
+  });
+
+  it('keeps the preset default position when no custom position is given', () => {
+    const overlays = service.createBrandOverlay('ilusiones-colores', 10, 'ending');
+    expect(overlays[0].position).not.toBe('custom');
+    expect(overlays[0].customPosition).toBeUndefined();
+  });
 });

@@ -8,6 +8,7 @@ import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
 import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset, VideoFitMode } from '@social-downloader/contracts';
+import type { NormalizedPosition } from './editor/position';
 
 @Component({
   selector: 'app-studio-page',
@@ -15,14 +16,36 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
   imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent, OverlayEditorComponent, AudioPanelComponent],
   template: `
     <div class="studio">
-      <header class="studio-header">
-        <div class="header-inner">
-          <h1>Studio</h1>
-          <p class="tagline">Crea contenido visual para redes sociales</p>
+      <header class="studio-topbar">
+        <div class="topbar-left">
+          <h1 class="topbar-logo">Studio</h1>
+          <span class="topbar-tagline">Contenido visual para redes sociales</span>
+        </div>
+        <div class="topbar-center">
+          @if (store.sourceVideoUrl()) {
+            <div class="preset-selector">
+              @for (preset of compositionPresets(); track preset.id) {
+                <button class="topbar-chip" [class.active]="activeCompPresetId() === preset.id" (click)="applyCompositionPreset(preset)">
+                  {{ preset.name }}
+                </button>
+              }
+            </div>
+          }
+        </div>
+        <div class="topbar-right">
+          @if (store.sourceVideoUrl()) {
+            <button class="btn-ghost btn-sm" (click)="showSavePreset.set(true)">Guardar preset</button>
+          }
+          <button class="render-btn-top" [disabled]="!store.canRender()" (click)="startRender()">
+            @if (store.renderState() === 'rendering') {
+              <span class="render-spinner"></span>
+            }
+            Renderizar
+          </button>
         </div>
       </header>
 
-      <main class="studio-main">
+      <main class="studio-workspace">
         @if (showRecoveredBanner()) {
           <div class="recovery-banner">
             <span>Se recuper&oacute; tu composici&oacute;n anterior</span>
@@ -45,8 +68,38 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
           </div>
         }
 
-        <div class="studio-grid">
-          <div class="preview-column">
+        <div class="workspace-grid">
+          <aside class="elements-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">Elementos</h3>
+            </div>
+            <div class="panel-body">
+              @if (store.sourceVideoUrl()) {
+                <div class="layer-item" [class.active]="selectedLayerType() === 'source'" (click)="selectLayer('source')">
+                  <span class="layer-icon">&#9654;</span>
+                  <span class="layer-name">Video Source</span>
+                </div>
+              }
+              @for (overlay of store.textOverlays(); track overlay.id) {
+                <div class="layer-item" [class.active]="selectedOverlayId() === overlay.id" (click)="selectedOverlayId.set(overlay.id); selectedLayerType.set(null)">
+                  <span class="layer-icon">T</span>
+                  <span class="layer-name">{{ overlay.text | slice:0:20 }}{{ overlay.text.length > 20 ? '...' : '' }}</span>
+                  <button class="layer-remove" (click)="$event.stopPropagation(); onOverlayRemove(overlay.id)">&times;</button>
+                </div>
+              }
+              @if (store.sourceVideoUrl()) {
+                <div class="layer-item" [class.active]="selectedLayerType() === 'brand'" (click)="selectLayer('brand')">
+                  <span class="layer-icon">@</span>
+                  <span class="layer-name">{{ store.selectedPreset() ? '@Ilusiones&Colores' : 'Marca' }}</span>
+                </div>
+              }
+              @if (!store.sourceVideoUrl()) {
+                <div class="empty-hint">Sube un video para comenzar</div>
+              }
+            </div>
+          </aside>
+
+          <section class="canvas-area">
             <div class="preview-wrapper">
               @if (store.sourceVideoUrl(); as videoUrl) {
                 <app-video-preview
@@ -55,7 +108,10 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
                   [brandOverlays]="store.brandOverlays()"
                   [duration]="store.totalDuration()"
                   [showSafeZones]="store.showSafeZones()"
-                  (timeChange)="store.currentTime.set($event)">
+                  [selectedOverlayId]="selectedOverlayId()"
+                  (timeChange)="store.currentTime.set($event)"
+                  (overlaySelect)="onOverlaySelect($event)"
+                  (overlayPositionChange)="onOverlayPositionChange($event)">
                 </app-video-preview>
               } @else {
                 <div class="upload-zone" (click)="fileInput.click()" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
@@ -85,257 +141,262 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
             }
 
             <input #fileInput type="file" accept="video/*" (change)="onFileSelected($event)" hidden>
-          </div>
+          </section>
 
-          <div class="editor-column">
-            <div class="editor-scroll">
-              <section class="card">
-                <h3 class="card-title">Composici&oacute;n</h3>
-                <div class="preset-row">
-                  @for (preset of compositionPresets(); track preset.id) {
-                    <button class="chip-btn" (click)="applyCompositionPreset(preset)">
-                      <span class="chip-label">{{ preset.name }}</span>
-                      <span class="chip-desc">{{ preset.description }}</span>
+          <aside class="properties-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">{{ propertiesTitle() }}</h3>
+            </div>
+            <div class="panel-body">
+              @if (selectedLayerType() === 'source' && store.sourceVideoUrl()) {
+                <div class="prop-section">
+                  <h4 class="prop-label">Ajuste de video</h4>
+                  <div class="fit-grid">
+                    <button class="fit-btn" [class.active]="store.videoFitMode() === 'crop'" (click)="store.videoFitMode.set('crop')">
+                      <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                      <span class="fit-label">Crop</span>
+                      <span class="fit-sub">Llena 9:16</span>
                     </button>
-                  }
-                </div>
-              </section>
-
-              <section class="card">
-                <h3 class="card-title">Marca</h3>
-                <div class="brand-row">
-                  @for (preset of presets(); track preset.id) {
-                    <button
-                      class="brand-btn"
-                      [class.active]="store.selectedPreset()?.id === preset.id"
-                      (click)="store.setPreset(preset)">
-                      {{ preset.name }}
+                    <button class="fit-btn" [class.active]="store.videoFitMode() === 'fit-blur'" (click)="store.videoFitMode.set('fit-blur')">
+                      <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+                      <span class="fit-label">Fit + Blur</span>
+                      <span class="fit-sub">Fondo borroso</span>
                     </button>
-                  }
-                </div>
-                <div class="brand-preview">
-                  @if (store.selectedPreset(); as preset) {
-                    <span class="brand-signature">{{ preset.signature.text }}</span>
-                    <span class="brand-badge">{{ preset.signature.defaultMode }}</span>
-                  } @else {
-                    <span class="brand-empty">Selecciona una marca</span>
-                  }
-                </div>
-              </section>
-
-              <section class="card">
-                <h3 class="card-title">Textos</h3>
-                <div class="text-chips">
-                  @for (preset of textPresets(); track preset.id) {
-                    <button
-                      class="text-chip"
-                      [class.active]="selectedTextPreset()?.id === preset.id"
-                      (click)="selectedTextPreset.set(selectedTextPreset()?.id === preset.id ? null : preset)">
-                      {{ preset.name }}
+                    <button class="fit-btn" [class.active]="store.videoFitMode() === 'fit-background'" (click)="store.videoFitMode.set('fit-background')">
+                      <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                      <span class="fit-label">Fit + Color</span>
+                      <span class="fit-sub">Color s&oacute;lido</span>
                     </button>
-                  }
-                </div>
-                <div class="text-list">
-                  @for (overlay of store.textOverlays(); track overlay.id) {
-                    <div
-                      class="text-item"
-                      [class.active]="selectedOverlayId() === overlay.id"
-                      (click)="selectedOverlayId.set(overlay.id)">
-                      <div class="text-item-content">
-                        <span class="text-item-label">{{ overlay.text }}</span>
-                        <span class="text-item-time">{{ overlay.startTime | number:'1.1-1' }}s &ndash; {{ overlay.endTime | number:'1.1-1' }}s</span>
-                      </div>
-                      <button class="text-item-remove" (click)="$event.stopPropagation(); onOverlayRemove(overlay.id)">&times;</button>
+                  </div>
+                  @if (store.videoFitMode() === 'fit-background') {
+                    <div class="color-row">
+                      <label class="color-label">Color de fondo</label>
+                      <input type="color" [value]="store.videoFitBackgroundColor()" (input)="store.videoFitBackgroundColor.set($any($event.target).value)" class="color-input">
                     </div>
                   }
-                  @if (store.textOverlays().length === 0) {
-                    <p class="empty-hint">Agrega textos usando los presets de arriba</p>
+                </div>
+                <div class="prop-section">
+                  <h4 class="prop-label">Audio original</h4>
+                  <label class="check-label">
+                    <input type="checkbox" [checked]="keepOriginalAudio()" (change)="keepOriginalAudio.set(!keepOriginalAudio())">
+                    <span>Activar audio original</span>
+                  </label>
+                  @if (keepOriginalAudio()) {
+                    <div class="volume-row">
+                      <span class="volume-label">Volumen</span>
+                      <input type="range" class="volume-slider" min="0" max="1" step="0.05" [value]="originalVolume()" (input)="originalVolume.set(+$any($event.target).value)">
+                      <span class="volume-value">{{ (originalVolume() * 100) | number:'1.0-0' }}%</span>
+                    </div>
                   }
                 </div>
-                <div class="text-add">
-                  <input
-                    [(ngModel)]="newText"
-                    [placeholder]="selectedTextPreset()?.description ?? 'Escribe tu texto...'"
-                    class="text-field"
-                    (keydown.enter)="addText()">
-                  <button class="btn-primary btn-sm" (click)="addText()" [disabled]="!newText()">Agregar</button>
-                </div>
-              </section>
-
-              @if (selectedOverlay(); as ov) {
+              } @else if (selectedOverlay()) {
                 <app-overlay-editor
-                  [overlay]="ov"
+                  [overlay]="selectedOverlay()!"
                   (overlayUpdate)="onOverlayUpdate($event)"
                   (duplicate)="onOverlayDuplicate($event)"
                   (remove)="onOverlayRemove($event)">
                 </app-overlay-editor>
-              }
-
-              <section class="card">
-                <h3 class="card-title">Audio</h3>
-                <app-audio-panel
-                  [musicTracks]="store.musicTracks()"
-                  [sfxTracks]="store.sfxTracks()"
-                  [keepOriginal]="keepOriginalAudio()"
-                  [originalVolume]="originalVolume()"
-                  [autoDuck]="autoDuck()"
-                  [duration]="store.totalDuration()"
-                  (toggleOriginal)="keepOriginalAudio.set(!keepOriginalAudio())"
-                  (volumeChange)="originalVolume.set($event)"
-                  (autoDuckChange)="autoDuck.set(!autoDuck())"
-                  (uploadMusic)="onUploadMusic($event)"
-                  (uploadSfx)="onUploadSfx($event)"
-                  (removeTrack)="store.removeAudioTrack($event)"
-                  (updateTrack)="onUpdateAudioTrack($event)">
-                </app-audio-panel>
-              </section>
-
-              <section class="card">
-                <h3 class="card-title">Ajuste de video</h3>
-                <div class="fit-grid">
-                  <button class="fit-btn" [class.active]="store.videoFitMode() === 'crop'" (click)="store.videoFitMode.set('crop')">
-                    <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-                    <span class="fit-label">Crop</span>
-                    <span class="fit-sub">Llena 9:16</span>
-                  </button>
-                  <button class="fit-btn" [class.active]="store.videoFitMode() === 'fit-blur'" (click)="store.videoFitMode.set('fit-blur')">
-                    <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
-                    <span class="fit-label">Fit + Blur</span>
-                    <span class="fit-sub">Fondo borroso</span>
-                  </button>
-                  <button class="fit-btn" [class.active]="store.videoFitMode() === 'fit-background'" (click)="store.videoFitMode.set('fit-background')">
-                    <svg class="fit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-                    <span class="fit-label">Fit + Color</span>
-                    <span class="fit-sub">Color s&oacute;lido</span>
-                  </button>
-                </div>
-                @if (store.videoFitMode() === 'fit-background') {
-                  <div class="color-row">
-                    <label class="color-label">Color de fondo</label>
-                    <input type="color" [value]="store.videoFitBackgroundColor()" (input)="store.videoFitBackgroundColor.set($any($event.target).value)" class="color-input">
+              } @else if (selectedLayerType() === 'brand') {
+                <div class="prop-section">
+                  <h4 class="prop-label">Marca</h4>
+                  <div class="brand-preview">
+                    <span class="brand-signature">@Ilusiones&Colores</span>
+                    <span class="brand-badge">{{ store.selectedPreset()?.signature?.defaultMode }}</span>
                   </div>
-                }
-              </section>
-
-              <section class="card">
-                <h3 class="card-title">Exportar</h3>
-                <div class="export-list">
-                  @for (preset of exportPresets(); track preset.id) {
-                    <button
-                      class="export-btn"
-                      [class.active]="store.selectedExportPreset()?.id === preset.id"
-                      (click)="store.setExportPreset(preset)">
-                      <div class="export-top">
-                        <span class="export-name">{{ preset.name }}</span>
-                        <span class="export-specs">{{ preset.width }}&times;{{ preset.height }} &bull; {{ preset.fps }}fps &bull; CRF {{ preset.crf }}</span>
-                      </div>
-                      <span class="export-desc">{{ preset.description }}</span>
-                      <span class="export-est">~{{ preset.estimatedSizePerSecond }}</span>
-                    </button>
-                  }
+                  <div class="brand-row">
+                    @for (preset of presets(); track preset.id) {
+                      <button
+                        class="brand-btn"
+                        [class.active]="store.selectedPreset()?.id === preset.id"
+                        (click)="store.setPreset(preset)">
+                        {{ preset.name }}
+                      </button>
+                    }
+                  </div>
                 </div>
-
-                <label class="check-label">
-                  <input type="checkbox" [checked]="store.showSafeZones()" (change)="store.showSafeZones.set(!store.showSafeZones())">
-                  <span>Mostrar zonas seguras</span>
-                </label>
-
-                <div class="action-row">
-                  <button class="btn-ghost" (click)="duplicateComposition()" [disabled]="!store.composition()">Duplicar</button>
-                  <button class="btn-ghost" (click)="showSavePreset.set(true)" [disabled]="!store.composition()">Guardar preset</button>
+                <div class="prop-section">
+                  <h4 class="prop-label">M&uacute;sica</h4>
+                  <app-audio-panel
+                    [musicTracks]="store.musicTracks()"
+                    [sfxTracks]="store.sfxTracks()"
+                    [keepOriginal]="keepOriginalAudio()"
+                    [originalVolume]="originalVolume()"
+                    [autoDuck]="autoDuck()"
+                    [duration]="store.totalDuration()"
+                    (toggleOriginal)="keepOriginalAudio.set(!keepOriginalAudio())"
+                    (volumeChange)="originalVolume.set($event)"
+                    (autoDuckChange)="autoDuck.set(!autoDuck())"
+                    (uploadMusic)="onUploadMusic($event)"
+                    (uploadSfx)="onUploadSfx($event)"
+                    (removeTrack)="store.removeAudioTrack($event)"
+                    (updateTrack)="onUpdateAudioTrack($event)">
+                  </app-audio-panel>
                 </div>
-
-                @if (showSavePreset()) {
-                  <div class="save-form">
-                    <input [(ngModel)]="presetName" placeholder="Nombre del preset" class="text-field" (keydown.enter)="saveCompositionPreset()">
-                    <div class="save-actions">
-                      <button class="btn-primary btn-sm" (click)="saveCompositionPreset()" [disabled]="!presetName()">Guardar</button>
-                      <button class="btn-ghost btn-sm" (click)="showSavePreset.set(false)">Cancelar</button>
+              } @else if (!store.sourceVideoUrl()) {
+                <div class="empty-hint">Selecciona un elemento para editar</div>
+              } @else {
+                <div class="prop-section">
+                  <h4 class="prop-label">Exportar</h4>
+                  <div class="export-list">
+                    @for (preset of exportPresets(); track preset.id) {
+                      <button
+                        class="export-btn"
+                        [class.active]="store.selectedExportPreset()?.id === preset.id"
+                        (click)="store.setExportPreset(preset)">
+                        <div class="export-top">
+                          <span class="export-name">{{ preset.name }}</span>
+                          <span class="export-specs">{{ preset.width }}&times;{{ preset.height }} &bull; {{ preset.fps }}fps</span>
+                        </div>
+                        <span class="export-desc">{{ preset.description }}</span>
+                      </button>
+                    }
+                  </div>
+                  <label class="check-label">
+                    <input type="checkbox" [checked]="store.showSafeZones()" (change)="store.showSafeZones.set(!store.showSafeZones())">
+                    <span>Mostrar zonas seguras</span>
+                  </label>
+                </div>
+                <div class="prop-section">
+                  <h4 class="prop-label">Agregar texto</h4>
+                  <div class="text-chips">
+                    @for (preset of textPresets(); track preset.id) {
+                      <button class="text-chip" [class.active]="selectedTextPreset()?.id === preset.id" (click)="selectedTextPreset.set(selectedTextPreset()?.id === preset.id ? null : preset)">
+                        {{ preset.name }}
+                      </button>
+                    }
+                  </div>
+                  <div class="text-add">
+                    <input
+                      [(ngModel)]="newText"
+                      [placeholder]="selectedTextPreset()?.description ?? 'Escribe tu texto...'"
+                      class="text-field"
+                      (keydown.enter)="addText()">
+                    <button class="btn-primary btn-sm" (click)="addText()" [disabled]="!newText()">Agregar</button>
+                  </div>
+                </div>
+                @if (store.savedPresets().length > 0) {
+                  <div class="prop-section">
+                    <h4 class="prop-label">Presets guardados</h4>
+                    <div class="saved-list">
+                      @for (preset of store.savedPresets(); track preset.id) {
+                        <div class="saved-item">
+                          <button class="saved-btn" (click)="applySavedPreset(preset)">{{ preset.name }}</button>
+                          <button class="saved-remove" (click)="deleteSavedPreset(preset.id)">&times;</button>
+                        </div>
+                      }
                     </div>
                   </div>
                 }
-
-                <button
-                  class="render-btn"
-                  [disabled]="!store.canRender()"
-                  (click)="startRender()">
-                  @if (store.renderState() === 'rendering') {
-                    <span class="render-spinner"></span>
-                    Renderizando...
-                  } @else {
-                    Renderizar video
-                  }
-                </button>
-
-                @if (store.renderState() === 'rendering') {
-                  <div class="progress-track">
-                    <div class="progress-fill" [style.width]="store.renderProgress() + '%'"></div>
-                  </div>
-                  <span class="progress-label">{{ store.renderProgress() }}%</span>
-                  <button class="btn-danger" (click)="cancelRender()">Cancelar</button>
-                }
-
-                @if (store.renderResult(); as result) {
-                  <div class="render-result">
-                    @if (result.status === 'completed') {
-                      <span class="result-success">Completado</span>
-                      <div class="result-actions">
-                        <a class="btn-primary" [href]="getDownloadUrl(result.id)" target="_blank">Descargar</a>
-                        <button class="btn-ghost" (click)="reRender()">Renderizar de nuevo</button>
-                      </div>
-                    }
-                    @if (result.status === 'failed') {
-                      <span class="result-error">{{ result.error }}</span>
-                    }
-                    @if (result.status === 'cancelled') {
-                      <span class="result-cancelled">Cancelado</span>
-                    }
-                  </div>
-                }
-              </section>
-
-              @if (store.savedPresets().length > 0) {
-                <section class="card">
-                  <h3 class="card-title">Presets guardados</h3>
-                  <div class="saved-list">
-                    @for (preset of store.savedPresets(); track preset.id) {
-                      <div class="saved-item">
-                        <button class="saved-btn" (click)="applySavedPreset(preset)">{{ preset.name }}</button>
-                        <button class="saved-remove" (click)="deleteSavedPreset(preset.id)">&times;</button>
-                      </div>
-                    }
-                  </div>
-                </section>
               }
+
+              @if (store.renderState() !== 'idle') {
+                <div class="render-section">
+                  @if (store.renderState() === 'rendering') {
+                    <div class="progress-track">
+                      <div class="progress-fill" [style.width]="store.renderProgress() + '%'"></div>
+                    </div>
+                    <span class="progress-label">{{ store.renderProgress() }}%</span>
+                    <button class="btn-danger" (click)="cancelRender()">Cancelar</button>
+                  }
+                  @if (store.renderState() === 'success') {
+                    <div class="render-result">
+                      <p class="result-success">Completado</p>
+                      <div class="result-actions">
+                        <a class="btn-primary btn-sm download-btn" [href]="downloadUrl()" target="_blank">Descargar</a>
+                        <button class="btn-ghost btn-sm" (click)="reRender()">Renderizar de nuevo</button>
+                      </div>
+                    </div>
+                  }
+                  @if (store.renderState() === 'error') {
+                    <div class="render-result">
+                      <p class="result-error">{{ store.renderResult()?.error ?? 'Error desconocido' }}</p>
+                      <button class="btn-ghost btn-sm" (click)="store.setRenderState('idle')">Reintentar</button>
+                    </div>
+                  }
+                  @if (store.renderState() === 'cancelled') {
+                    <div class="render-result">
+                      <p class="result-cancelled">Renderizado cancelado</p>
+                      <button class="btn-ghost btn-sm" (click)="store.setRenderState('idle')">Cerrar</button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </aside>
+        </div>
+      </main>
+
+      @if (showSavePreset()) {
+        <div class="modal-backdrop" (click)="showSavePreset.set(false)">
+          <div class="save-form" (click)="$event.stopPropagation()">
+            <h4 class="save-form-title">Guardar preset de composici&oacute;n</h4>
+            <input
+              [(ngModel)]="presetName"
+              placeholder="Nombre del preset"
+              class="text-field"
+              (keydown.enter)="saveCompositionPreset()">
+            <div class="save-form-actions">
+              <button class="btn-ghost btn-sm" (click)="showSavePreset.set(false)">Cancelar</button>
+              <button class="btn-primary btn-sm" (click)="saveCompositionPreset()" [disabled]="!presetName()">Guardar</button>
             </div>
           </div>
         </div>
-      </main>
+      }
     </div>
   `,
   styles: [`
-    :host { display: block; min-height: 100vh; background: var(--color-bg); }
+    :host { display: block; height: 100vh; background: var(--color-bg); overflow: hidden; }
 
-    .studio { max-width: 1280px; margin: 0 auto; padding: 0 20px 80px; }
+    .studio {
+      display: flex; flex-direction: column; height: 100vh;
+    }
 
-    .studio-header {
-      padding: 40px 0 32px;
+    .studio-topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px; height: 56px; flex-shrink: 0;
+      background: var(--color-surface);
       border-bottom: 1px solid var(--color-border-subtle);
-      margin-bottom: 32px;
     }
-    .header-inner { max-width: 600px; }
-    .studio-header h1 {
-      font-size: 28px; font-weight: 700; color: var(--color-text-primary);
-      margin: 0; letter-spacing: -0.03em; line-height: 1.1;
+    .topbar-left { display: flex; align-items: baseline; gap: 12px; }
+    .topbar-logo {
+      font-size: 18px; font-weight: 700; color: var(--color-text-primary);
+      margin: 0; letter-spacing: -0.03em;
     }
-    .tagline { font-size: 14px; color: var(--color-text-muted); margin: 6px 0 0; }
+    .topbar-tagline { font-size: 12px; color: var(--color-text-muted); }
+    .topbar-center { flex: 1; display: flex; justify-content: center; }
+    .preset-selector { display: flex; gap: 4px; }
+    .topbar-chip {
+      padding: 5px 12px; font-size: 11px; font-weight: 500;
+      background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: 6px; color: var(--color-text-secondary); cursor: pointer;
+      transition: all 0.15s;
+    }
+    .topbar-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+    .topbar-chip.active {
+      background: var(--color-accent); color: #fff; border-color: var(--color-accent);
+    }
+    .topbar-right { display: flex; align-items: center; gap: 8px; }
+    .render-btn-top {
+      padding: 7px 16px; font-size: 12px; font-weight: 600;
+      background: linear-gradient(135deg, var(--color-accent), #2563eb);
+      border: none; border-radius: 6px; color: #fff;
+      cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .render-btn-top:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 12px var(--color-accent-glow); }
+    .render-btn-top:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .studio-workspace {
+      flex: 1; display: flex; flex-direction: column; min-height: 0;
+      overflow: hidden;
+    }
 
     .recovery-banner {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 16px; margin-bottom: 20px;
+      padding: 8px 16px; margin: 0 20px;
       background: var(--color-accent-glow); border: 1px solid var(--color-accent);
-      border-radius: 8px; font-size: 13px; color: var(--color-text-primary);
-      animation: fadeSlideIn 0.3s ease;
+      border-radius: 8px; font-size: 12px; color: var(--color-text-primary);
+      animation: fadeSlideIn 0.3s ease; flex-shrink: 0;
     }
     @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
     .banner-close {
@@ -346,16 +407,16 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .warnings-bar {
       position: relative;
       display: flex; align-items: center; gap: 8px;
-      padding: 10px 14px; margin-bottom: 20px;
+      padding: 8px 14px; margin: 8px 20px 0;
       background: var(--color-surface); border: 1px solid var(--color-border);
-      border-radius: 8px; font-size: 12px; color: var(--color-text-secondary);
-      cursor: pointer;
+      border-radius: 8px; font-size: 11px; color: var(--color-text-secondary);
+      cursor: pointer; flex-shrink: 0;
     }
     .warnings-bar:hover .warnings-list { display: block; }
     .warnings-icon {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 20px; height: 20px; border-radius: 50%;
-      background: #f59e0b; color: #fff; font-size: 11px; font-weight: 700;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #f59e0b; color: #fff; font-size: 10px; font-weight: 700;
     }
     .warnings-list {
       display: none; position: absolute; top: 100%; left: 0; right: 0;
@@ -364,7 +425,6 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
       padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
       max-height: 240px; overflow-y: auto;
     }
-    .warnings-bar:hover .warnings-list { display: block; }
     .warning-item {
       display: flex; gap: 8px; padding: 6px 8px;
       border-radius: 4px; font-size: 11px; line-height: 1.4;
@@ -381,32 +441,87 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .severity-info .warning-type { color: #3b82f6; }
     .warning-msg { color: var(--color-text-secondary); }
 
-    .studio-grid {
-      display: grid;
-      grid-template-columns: 1fr 400px;
-      gap: 28px;
-      align-items: start;
+    .workspace-grid {
+      flex: 1; display: grid;
+      grid-template-columns: 220px 1fr 320px;
+      min-height: 0; overflow: hidden;
     }
 
-    .preview-column {
-      position: sticky; top: 20px;
-      display: flex; flex-direction: column; gap: 16px;
+    .elements-panel, .properties-panel {
+      display: flex; flex-direction: column;
+      border-right: 1px solid var(--color-border-subtle);
+      background: var(--color-surface);
+      min-height: 0; overflow: hidden;
+    }
+    .properties-panel {
+      border-right: none;
+      border-left: 1px solid var(--color-border-subtle);
+    }
+    .panel-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--color-border-subtle);
+      flex-shrink: 0;
+    }
+    .panel-title {
+      font-size: 10px; font-weight: 700; color: var(--color-text-muted);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin: 0;
+    }
+    .panel-body {
+      flex: 1; overflow-y: auto; padding: 12px 16px;
+      scrollbar-width: thin;
+    }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-track { background: transparent; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+
+    .layer-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+      margin-bottom: 2px;
+    }
+    .layer-item:hover { background: var(--color-bg); }
+    .layer-item.active { background: var(--color-accent-glow); border: 1px solid var(--color-accent); }
+    .layer-icon {
+      width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: var(--color-text-muted);
+      background: var(--color-bg); border-radius: 4px; flex-shrink: 0;
+    }
+    .layer-item.active .layer-icon { background: var(--color-accent); color: #fff; }
+    .layer-name {
+      flex: 1; font-size: 12px; color: var(--color-text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .layer-remove {
+      background: none; border: none; color: var(--color-text-muted);
+      font-size: 14px; padding: 2px 4px; border-radius: 4px;
+      cursor: pointer; line-height: 1; opacity: 0; transition: all 0.15s;
+    }
+    .layer-item:hover .layer-remove { opacity: 1; }
+    .layer-remove:hover { color: var(--color-danger); }
+
+    .canvas-area {
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 16px; min-height: 0; overflow: hidden;
+      background: var(--color-bg);
     }
     .preview-wrapper {
-      border-radius: 12px; overflow: hidden;
+      flex: 1; border-radius: 12px; overflow: hidden;
       border: 1px solid var(--color-border-subtle);
       background: var(--color-surface);
+      min-height: 0;
     }
     .timeline-wrapper {
       border-radius: 12px; overflow: hidden;
       border: 1px solid var(--color-border-subtle);
       background: var(--color-surface);
-      padding: 12px;
+      padding: 12px; flex-shrink: 0;
     }
 
     .upload-zone {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-height: 480px; cursor: pointer;
+      height: 100%; min-height: 400px; cursor: pointer;
       border: 2px dashed var(--color-border); border-radius: 12px;
       background: var(--color-surface);
       transition: all 0.2s ease;
@@ -417,41 +532,17 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .upload-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
     .upload-sub { font-size: 13px; color: var(--color-text-muted); margin: 4px 0 0; }
 
-    .editor-column { min-width: 0; }
-    .editor-scroll {
-      display: flex; flex-direction: column; gap: 16px;
+    .prop-section { margin-bottom: 16px; }
+    .prop-section:last-child { margin-bottom: 0; }
+    .prop-label {
+      font-size: 10px; font-weight: 700; color: var(--color-text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+      margin: 0 0 8px;
     }
 
-    .card {
-      background: var(--color-surface);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: 12px;
-      padding: 20px;
-      transition: border-color 0.15s;
-    }
-    .card:hover { border-color: var(--color-border); }
-
-    .card-title {
-      font-size: 11px; font-weight: 700; color: var(--color-text-muted);
-      text-transform: uppercase; letter-spacing: 0.08em;
-      margin: 0 0 14px;
-    }
-
-    .preset-row { display: flex; flex-direction: column; gap: 8px; }
-    .chip-btn {
-      display: flex; flex-direction: column; align-items: flex-start;
-      padding: 10px 14px; width: 100%;
-      background: var(--color-bg); border: 1px solid var(--color-border);
-      border-radius: 8px; cursor: pointer; text-align: left;
-      transition: all 0.15s;
-    }
-    .chip-btn:hover { border-color: var(--color-accent); }
-    .chip-label { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-    .chip-desc { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
-
-    .brand-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .brand-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
     .brand-btn {
-      padding: 8px 14px; font-size: 12px; font-weight: 500;
+      padding: 6px 12px; font-size: 11px; font-weight: 500;
       background: var(--color-bg); border: 1px solid var(--color-border);
       border-radius: 6px; color: var(--color-text-secondary); cursor: pointer;
       transition: all 0.15s;
@@ -459,23 +550,21 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .brand-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
     .brand-btn.active {
       background: var(--color-accent); color: #fff; border-color: var(--color-accent);
-      box-shadow: 0 0 16px var(--color-accent-glow);
     }
     .brand-preview {
       display: flex; align-items: center; gap: 10px;
-      padding: 10px 14px; background: var(--color-bg);
+      padding: 8px 12px; background: var(--color-bg);
       border-radius: 8px;
     }
-    .brand-signature { font-family: Georgia, serif; font-style: italic; font-size: 15px; color: var(--color-text-primary); }
+    .brand-signature { font-family: Georgia, serif; font-style: italic; font-size: 14px; color: var(--color-text-primary); }
     .brand-badge {
       font-size: 10px; font-weight: 600; color: var(--color-text-muted);
-      background: var(--color-surface); padding: 3px 8px; border-radius: 9999px;
+      background: var(--color-surface); padding: 2px 6px; border-radius: 9999px;
     }
-    .brand-empty { font-size: 13px; color: var(--color-text-muted); }
 
-    .text-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .text-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
     .text-chip {
-      padding: 5px 12px; font-size: 11px; font-weight: 500;
+      padding: 4px 10px; font-size: 10px; font-weight: 500;
       background: var(--color-bg); border: 1px solid var(--color-border);
       border-radius: 9999px; color: var(--color-text-secondary); cursor: pointer;
       transition: all 0.15s;
@@ -483,52 +572,28 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .text-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
     .text-chip.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 
-    .text-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-    .text-item {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 10px; background: var(--color-bg);
-      border: 1px solid transparent; border-radius: 6px;
-      cursor: pointer; transition: all 0.15s;
-    }
-    .text-item:hover { border-color: var(--color-border); }
-    .text-item.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
-    .text-item-content { flex: 1; min-width: 0; }
-    .text-item-label {
-      display: block; font-size: 12px; color: var(--color-text-primary);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .text-item-time { font-size: 10px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-    .text-item-remove {
-      background: none; border: none; color: var(--color-text-muted);
-      font-size: 16px; padding: 2px 4px; border-radius: 4px; cursor: pointer;
-      line-height: 1; transition: all 0.15s;
-    }
-    .text-item-remove:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-
-    .empty-hint { font-size: 12px; color: var(--color-text-muted); text-align: center; padding: 12px; }
-
-    .text-add { display: flex; gap: 8px; }
+    .text-add { display: flex; gap: 6px; }
 
     .text-field {
-      flex: 1; padding: 9px 12px; font-size: 13px;
+      flex: 1; padding: 8px 10px; font-size: 12px;
       background: var(--color-bg); border: 1px solid var(--color-border);
       border-radius: 6px; color: var(--color-text-primary);
       transition: border-color 0.15s;
     }
-    .text-field:focus { border-color: var(--color-accent); outline: none; box-shadow: 0 0 0 3px var(--color-accent-glow); }
+    .text-field:focus { border-color: var(--color-accent); outline: none; box-shadow: 0 0 0 2px var(--color-accent-glow); }
 
     .btn-primary {
-      padding: 10px 18px; font-size: 13px; font-weight: 600;
+      padding: 8px 14px; font-size: 12px; font-weight: 600;
       background: var(--color-accent); border: none; border-radius: 6px;
       color: #fff; cursor: pointer; transition: all 0.15s;
       text-decoration: none; display: inline-flex; align-items: center; justify-content: center;
     }
     .btn-primary:hover { background: var(--color-accent-hover); }
     .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-sm { padding: 8px 14px; font-size: 12px; }
+    .btn-sm { padding: 6px 12px; font-size: 11px; }
 
     .btn-ghost {
-      padding: 8px 14px; font-size: 12px; font-weight: 500;
+      padding: 6px 12px; font-size: 11px; font-weight: 500;
       background: var(--color-bg); border: 1px solid var(--color-border);
       border-radius: 6px; color: var(--color-text-secondary); cursor: pointer;
       transition: all 0.15s;
@@ -537,125 +602,131 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-danger {
-      width: 100%; padding: 8px; font-size: 12px; font-weight: 500;
+      width: 100%; padding: 7px; font-size: 11px; font-weight: 500;
       background: none; border: 1px solid var(--color-danger);
       border-radius: 6px; color: var(--color-danger); cursor: pointer;
-      transition: all 0.15s; margin-top: 8px;
+      transition: all 0.15s; margin-top: 6px;
     }
     .btn-danger:hover { background: var(--color-danger-bg); }
 
-    .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
     .fit-btn {
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      padding: 12px 8px; background: var(--color-bg);
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 10px 6px; background: var(--color-bg);
       border: 1px solid var(--color-border); border-radius: 8px;
       cursor: pointer; transition: all 0.15s;
     }
     .fit-btn:hover { border-color: var(--color-accent); }
     .fit-btn.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
-    .fit-icon { width: 24px; height: 24px; color: var(--color-text-secondary); }
+    .fit-icon { width: 20px; height: 20px; color: var(--color-text-secondary); }
     .fit-btn.active .fit-icon { color: var(--color-accent); }
-    .fit-label { font-size: 11px; font-weight: 600; color: var(--color-text-primary); }
-    .fit-sub { font-size: 9px; color: var(--color-text-muted); }
+    .fit-label { font-size: 10px; font-weight: 600; color: var(--color-text-primary); }
+    .fit-sub { font-size: 8px; color: var(--color-text-muted); }
 
-    .color-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-    .color-label { font-size: 12px; color: var(--color-text-secondary); }
-    .color-input { width: 32px; height: 28px; border: 1px solid var(--color-border); border-radius: 4px; cursor: pointer; background: none; padding: 0; }
+    .color-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .color-label { font-size: 11px; color: var(--color-text-secondary); }
+    .color-input { width: 28px; height: 24px; border: 1px solid var(--color-border); border-radius: 4px; cursor: pointer; background: none; padding: 0; }
 
-    .export-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .volume-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .volume-label { font-size: 11px; color: var(--color-text-secondary); }
+    .volume-slider { flex: 1; accent-color: var(--color-accent); }
+    .volume-value { font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; min-width: 32px; }
+
+    .export-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
     .export-btn {
       display: flex; flex-direction: column; gap: 2px;
-      padding: 12px 14px; background: var(--color-bg);
+      padding: 10px 12px; background: var(--color-bg);
       border: 1px solid var(--color-border); border-radius: 8px;
       cursor: pointer; text-align: left; transition: all 0.15s;
     }
     .export-btn:hover { border-color: var(--color-accent); }
     .export-btn.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
     .export-top { display: flex; justify-content: space-between; align-items: baseline; }
-    .export-name { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+    .export-name { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
     .export-specs { font-size: 10px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-    .export-desc { font-size: 11px; color: var(--color-text-muted); }
-    .export-est { font-size: 10px; color: var(--color-text-muted); font-style: italic; }
+    .export-desc { font-size: 10px; color: var(--color-text-muted); }
 
     .check-label {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
-      margin-bottom: 12px;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--color-text-secondary); cursor: pointer;
+      margin-bottom: 10px;
     }
-    .check-label input[type="checkbox"] { accent-color: var(--color-accent); width: 15px; height: 15px; }
+    .check-label input[type="checkbox"] { accent-color: var(--color-accent); width: 14px; height: 14px; }
 
-    .action-row { display: flex; gap: 8px; margin-bottom: 14px; }
-    .action-row .btn-ghost { flex: 1; }
-
-    .save-form { margin-bottom: 14px; }
-    .save-actions { display: flex; gap: 8px; margin-top: 8px; }
-
-    .render-btn {
-      width: 100%; padding: 14px; font-size: 14px; font-weight: 700;
-      background: linear-gradient(135deg, var(--color-accent), #2563eb);
-      border: none; border-radius: 8px; color: #fff;
-      cursor: pointer; transition: all 0.2s;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      letter-spacing: 0.01em;
-    }
-    .render-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 20px var(--color-accent-glow); }
-    .render-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-    .render-spinner {
-      width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: #fff; border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
+    .render-section { margin-top: 12px; }
     .progress-track {
       width: 100%; height: 4px; background: var(--color-bg);
-      border-radius: 2px; margin-top: 12px; overflow: hidden;
+      border-radius: 2px; overflow: hidden;
     }
     .progress-fill {
       height: 100%; background: linear-gradient(90deg, var(--color-accent), #2563eb);
       border-radius: 2px; transition: width 0.3s ease;
     }
     .progress-label {
-      display: block; text-align: center; font-size: 11px;
+      display: block; text-align: center; font-size: 10px;
       color: var(--color-text-muted); margin-top: 4px;
       font-variant-numeric: tabular-nums;
     }
 
-    .render-result { margin-top: 12px; text-align: center; }
-    .result-success { color: var(--color-success); font-weight: 600; font-size: 13px; }
-    .result-error { color: var(--color-danger); font-size: 12px; }
-    .result-cancelled { color: var(--color-text-muted); font-size: 12px; }
-    .result-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .render-result { margin-top: 10px; text-align: center; }
+    .result-success { color: var(--color-success); font-weight: 600; font-size: 12px; }
+    .result-error { color: var(--color-danger); font-size: 11px; }
+    .result-cancelled { color: var(--color-text-muted); font-size: 11px; }
+    .result-actions { display: flex; gap: 6px; margin-top: 8px; }
     .result-actions .btn-primary, .result-actions .btn-ghost { flex: 1; text-align: center; }
 
-    .saved-list { display: flex; flex-direction: column; gap: 6px; }
-    .saved-item { display: flex; gap: 6px; }
+    .saved-list { display: flex; flex-direction: column; gap: 4px; }
+    .saved-item { display: flex; gap: 4px; }
     .saved-btn {
-      flex: 1; padding: 8px 12px; text-align: left;
+      flex: 1; padding: 6px 10px; text-align: left;
       background: var(--color-bg); border: 1px solid var(--color-border);
-      border-radius: 6px; font-size: 12px; font-weight: 500;
+      border-radius: 6px; font-size: 11px; font-weight: 500;
       color: var(--color-text-secondary); cursor: pointer;
       transition: all 0.15s;
     }
     .saved-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
     .saved-remove {
-      padding: 6px 10px; background: none;
+      padding: 4px 8px; background: none;
       border: 1px solid var(--color-border); border-radius: 6px;
-      color: var(--color-text-muted); font-size: 14px;
+      color: var(--color-text-muted); font-size: 12px;
       cursor: pointer; line-height: 1; transition: all 0.15s;
     }
     .saved-remove:hover { border-color: var(--color-danger); color: var(--color-danger); }
 
-    @media (max-width: 860px) {
-      .studio-grid { grid-template-columns: 1fr; }
-      .preview-column { position: static; }
-      .upload-zone { min-height: 280px; }
-      .editor-column { order: 2; }
+    .empty-hint { font-size: 11px; color: var(--color-text-muted); text-align: center; padding: 20px 8px; }
+
+    .render-spinner {
+      width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 1024px) {
+      .workspace-grid { grid-template-columns: 1fr; }
+      .elements-panel, .properties-panel { display: none; }
+      .topbar-center { display: none; }
     }
 
-    @media (min-width: 861px) and (max-width: 1100px) {
-      .studio-grid { grid-template-columns: 1fr 340px; gap: 20px; }
+    @media (min-width: 1025px) and (max-width: 1280px) {
+      .workspace-grid { grid-template-columns: 180px 1fr 280px; }
     }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex; align-items: center; justify-content: center;
+      animation: fade-in 0.15s ease;
+    }
+    .save-form {
+      width: 320px; padding: 20px;
+      background: var(--color-surface); border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-lg); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .save-form-title { margin: 0; font-size: 13px; font-weight: 700; color: var(--color-text-primary); }
+    .save-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   `],
 })
 export class StudioPageComponent {
@@ -675,6 +746,7 @@ export class StudioPageComponent {
   readonly showSavePreset = signal(false);
   readonly presetName = signal('');
   readonly showRecoveredBanner = signal(false);
+  readonly selectedLayerType = signal<'source' | 'brand' | null>(null);
 
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
@@ -684,6 +756,24 @@ export class StudioPageComponent {
 
   readonly warningCount = computed(() => this.store.validationWarnings().length);
   readonly errorCount = computed(() => this.store.validationWarnings().filter((w) => w.severity === 'error').length);
+
+  readonly activeCompPresetId = computed(() => {
+    const brandId = this.store.selectedPreset()?.id;
+    return brandId ?? null;
+  });
+
+  readonly propertiesTitle = computed(() => {
+    if (this.selectedLayerType() === 'source') return 'Video Source';
+    if (this.selectedLayerType() === 'brand') return 'Marca';
+    if (this.selectedOverlay()) return 'Editar texto';
+    return 'Propiedades';
+  });
+
+  readonly downloadUrl = computed(() => {
+    const result = this.store.renderResult();
+    if (!result?.id) return '';
+    return this.api.getDownloadUrl(result.id);
+  });
 
   private validateTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -735,6 +825,28 @@ export class StudioPageComponent {
     const input = event.target as HTMLInputElement;
     if (input.files?.length) {
       this.uploadFile(input.files[0]);
+    }
+  }
+
+  selectLayer(type: 'source' | 'brand'): void {
+    this.selectedOverlayId.set(null);
+    this.selectedLayerType.set(type);
+  }
+
+  onOverlaySelect(overlayId: string | null): void {
+    this.selectedOverlayId.set(overlayId);
+    const isBrand = overlayId !== null && this.store.brandOverlays().some((b) => b.id === overlayId);
+    this.selectedLayerType.set(isBrand ? 'brand' : null);
+  }
+
+  onOverlayPositionChange(event: { id: string; type: 'text' | 'brand'; position: NormalizedPosition }): void {
+    if (event.type === 'text') {
+      this.store.updateTextOverlay(event.id, {
+        position: 'custom',
+        customPosition: event.position,
+      });
+    } else {
+      this.store.updateBrandOverlayPosition(event.position);
     }
   }
 
@@ -797,6 +909,7 @@ export class StudioPageComponent {
       audioTracks: this.store.audioTracks(),
       keepOriginalAudio: this.keepOriginalAudio(),
       originalAudioVolume: this.originalVolume(),
+      brandCustomPosition: this.store.brandCustomPosition() ?? undefined,
     }).subscribe({
       next: (res) => {
         this.store.setComposition(res.composition);
@@ -818,7 +931,7 @@ export class StudioPageComponent {
     this.api.cancelRender(result.id).subscribe({
       next: () => {
         this.store.setRenderResult({ ...result, status: 'cancelled' });
-        this.store.setRenderState('idle');
+        this.store.setRenderState('cancelled');
       },
     });
   }

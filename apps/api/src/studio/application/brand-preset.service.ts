@@ -23,6 +23,7 @@ export class BrandPresetService {
     videoDuration: number,
     mode?: 'ending' | 'persistent' | 'segmented',
     segmentTimes?: Array<{ start: number; end: number }>,
+    customPosition?: { x: number; y: number },
   ): BrandOverlay[] {
     const preset = this.getPreset(presetId);
     if (!preset) return [];
@@ -30,16 +31,28 @@ export class BrandPresetService {
     const resolvedMode = mode ?? preset.signature.defaultMode;
     const style = preset.signature.style ?? this.defaultSignatureStyle();
 
-    switch (resolvedMode) {
-      case 'ending':
-        return this.createEndingOverlay(preset, style, videoDuration);
-      case 'persistent':
-        return this.createPersistentOverlay(preset, style, videoDuration);
-      case 'segmented':
-        return this.createSegmentedOverlay(preset, style, segmentTimes ?? []);
-      default:
-        return this.createEndingOverlay(preset, style, videoDuration);
-    }
+    const overlays = (() => {
+      switch (resolvedMode) {
+        case 'ending':
+          return this.createEndingOverlay(preset, style, videoDuration);
+        case 'persistent':
+          return this.createPersistentOverlay(preset, style, videoDuration);
+        case 'segmented':
+          return this.createSegmentedOverlay(preset, style, segmentTimes ?? []);
+        default:
+          return this.createEndingOverlay(preset, style, videoDuration);
+      }
+    })();
+
+    if (!customPosition) return overlays;
+
+    // A custom drag position (from the Studio preview) overrides the preset's default
+    // position for every overlay instance generated for this brand signature.
+    return overlays.map((overlay) => ({
+      ...overlay,
+      position: 'custom' as const,
+      customPosition,
+    }));
   }
 
   private createEndingOverlay(

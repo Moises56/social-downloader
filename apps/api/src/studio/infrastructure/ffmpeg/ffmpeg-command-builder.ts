@@ -248,8 +248,12 @@ function buildTextOverlayFilters(
     let currentLabel = inputLabel;
     for (let i = 0; i < phases.length; i++) {
       const phase = phases[i];
+      // basePos.y may be a plain number ("960", preset positions) or an FFmpeg
+      // expression ("960-text_h/2", custom positions). Append the slide-up offset as
+      // an arithmetic term instead of coercing with Number(), which would produce NaN
+      // for expression strings.
       const pos = animation === 'slide-up' && phase.opacity < text.style.opacity
-        ? { x: basePos.x, y: String(Number(basePos.y) + Math.round((1 - phase.opacity / text.style.opacity) * 30)) }
+        ? { x: basePos.x, y: `${basePos.y}+${Math.round((1 - phase.opacity / text.style.opacity) * 30)}` }
         : basePos;
       const isLast = i === phases.length - 1;
       const outLabel = isLast ? `[t${overlayIndex}]` : `[tp${overlayIndex}_${i}]`;
@@ -319,7 +323,7 @@ function buildBrandOverlayFilters(
   overlayIndex: number,
 ): string[] {
   const filters: string[] = [];
-  const pos = computePosition(brand.position, undefined, width, height, brand.style.fontSize);
+  const pos = computePosition(brand.position, brand.customPosition, width, height, brand.style.fontSize);
 
   const escaped = escapeDrawText(brand.text);
 
@@ -427,7 +431,12 @@ function computePosition(
   fontSize: number,
 ): { x: string; y: string } {
   if (position === 'custom' && customPosition) {
-    return { x: String(customPosition.x), y: String(customPosition.y) };
+    // Custom position uses normalized coordinates (0..1) where x/y represent center.
+    // Convert to FFmpeg drawtext coordinates: center the text at the normalized point.
+    return {
+      x: `${customPosition.x * width}-text_w/2`,
+      y: `${customPosition.y * height}-text_h/2`,
+    };
   }
 
   const topSafe = Math.round(height * 0.10);

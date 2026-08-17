@@ -20,31 +20,39 @@ const uploadVideo = async (page: Page) => {
   await expect(page.locator('.preview-wrapper video')).toBeVisible({ timeout: 10000 });
 };
 
+// Brand preset picker (.brand-btn) and the music panel only render once the "Marca"
+// layer is selected from the elements panel — open it before interacting with either.
+const openBrandPanel = async (page: Page) => {
+  await page.locator('.elements-panel .layer-item').filter({ hasText: /Marca|@Ilusiones/ }).click();
+};
+
 test.describe('Studio', () => {
   test.describe('Main Flow', () => {
     test('opens studio and shows upload zone', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
-      await expect(page.locator('.studio-header h1')).toHaveText('Studio');
-      await expect(page.locator('.preview-column .upload-zone')).toBeVisible();
-      await expect(page.locator('.preview-column .upload-title')).toHaveText('Sube un video');
+      await expect(page.locator('.topbar-logo')).toHaveText('Studio');
+      await expect(page.locator('.upload-zone')).toBeVisible();
+      await expect(page.locator('.upload-title')).toHaveText('Sube un video');
     });
 
     test('loads presets from API', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
+      await uploadVideo(page);
 
-      await expect(page.locator('.brand-btn').first()).toBeVisible({ timeout: 5000 });
-
-      const brandCount = await page.locator('.brand-btn').count();
-      expect(brandCount).toBeGreaterThan(0);
-
-      const compCount = await page.locator('.chip-btn').count();
+      // Composition preset chips live in the topbar once a video is loaded.
+      const compCount = await page.locator('.topbar-chip').count();
       expect(compCount).toBeGreaterThan(0);
 
+      // Default properties panel: text presets + export presets.
       const textCount = await page.locator('.text-chip').count();
       expect(textCount).toBeGreaterThan(0);
-
       const exportCount = await page.locator('.export-btn').count();
       expect(exportCount).toBeGreaterThan(0);
+
+      // Brand presets live in the "Marca" panel.
+      await openBrandPanel(page);
+      const brandCount = await page.locator('.brand-btn').count();
+      expect(brandCount).toBeGreaterThan(0);
     });
 
     test('upload video and show preview', async ({ page }: { page: Page }) => {
@@ -56,6 +64,7 @@ test.describe('Studio', () => {
     test('select brand preset', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
       await uploadVideo(page);
+      await openBrandPanel(page);
 
       const firstBrand = page.locator('.brand-btn').first();
       await firstBrand.click();
@@ -70,13 +79,15 @@ test.describe('Studio', () => {
       await page.locator('.text-add .text-field').fill('Test overlay text');
       await page.locator('.text-add .btn-primary').click();
 
-      await expect(page.locator('.text-item')).toBeVisible();
-      await expect(page.locator('.text-item-label')).toContainText('Test overlay text');
+      const textLayer = page.locator('.elements-panel .layer-item').filter({ has: page.locator('.layer-remove') });
+      await expect(textLayer).toBeVisible();
+      await expect(textLayer.locator('.layer-name')).toContainText('Test overlay text');
     });
 
     test('fit mode selector works', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
       await uploadVideo(page);
+      await page.locator('.elements-panel .layer-item').filter({ hasText: 'Video Source' }).click();
 
       await expect(page.locator('.fit-btn').first()).toHaveClass(/active/);
 
@@ -101,14 +112,14 @@ test.describe('Studio', () => {
 
     test('render button is disabled without video', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
-      await expect(page.locator('.render-btn')).toBeDisabled();
+      await expect(page.locator('.render-btn-top')).toBeDisabled();
     });
 
     test('render button enables after video upload', async ({ page }: { page: Page }) => {
       await page.goto(STUDIO_URL);
       await uploadVideo(page);
       await page.waitForTimeout(500);
-      await expect(page.locator('.render-btn')).toBeEnabled();
+      await expect(page.locator('.render-btn-top')).toBeEnabled();
     });
 
     test('main render flow', async ({ page }: { page: Page }) => {
@@ -117,17 +128,18 @@ test.describe('Studio', () => {
       await page.goto(STUDIO_URL);
       await uploadVideo(page);
 
-      await page.locator('.brand-btn').first().click();
-      await expect(page.locator('.brand-signature')).toBeVisible();
-
       await page.locator('.text-add .text-field').fill('TEST TEXT');
       await page.locator('.text-add .btn-primary').click();
-      await expect(page.locator('.text-item')).toBeVisible();
+      await expect(page.locator('.elements-panel .layer-item').filter({ has: page.locator('.layer-remove') })).toBeVisible();
 
       await expect(page.locator('.export-btn').first()).toHaveClass(/active/);
 
+      await openBrandPanel(page);
+      await page.locator('.brand-btn').first().click();
+      await expect(page.locator('.brand-signature')).toBeVisible();
+
       await page.waitForTimeout(500);
-      await page.locator('.render-btn').click();
+      await page.locator('.render-btn-top').click();
 
       await expect(page.locator('.render-spinner')).toBeVisible({ timeout: 5000 });
       await expect(page.locator('.progress-track')).toBeVisible();
@@ -143,10 +155,11 @@ test.describe('Studio', () => {
 
       await page.goto(STUDIO_URL);
       await uploadVideo(page);
+      await openBrandPanel(page);
       await page.locator('.brand-btn').first().click();
 
       await page.waitForTimeout(500);
-      await page.locator('.render-btn').click();
+      await page.locator('.render-btn-top').click();
 
       await expect(page.locator('.progress-track')).toBeVisible({ timeout: 5000 });
 
@@ -171,7 +184,7 @@ test.describe('Studio', () => {
       await page.locator('.text-add .btn-primary').click();
 
       await page.waitForTimeout(500);
-      await page.locator('.render-btn').click();
+      await page.locator('.render-btn-top').click();
       await expect(page.locator('.result-success')).toBeVisible({ timeout: 60000 });
 
       await page.locator('button:has-text("Guardar preset")').click();
@@ -193,17 +206,22 @@ test.describe('Studio', () => {
       await expect(page.locator('.timeline-wrapper')).toBeVisible();
 
       // Step 2: Select "Ilusiones & Colores — Devotional" composition preset
-      const devotionalPreset = page.locator('.chip-btn:has-text("Devotional")').first();
+      const devotionalPreset = page.locator('.topbar-chip:has-text("Devotional")').first();
       await expect(devotionalPreset).toBeVisible({ timeout: 5000 });
       await devotionalPreset.click();
 
       // Step 3: Verify text overlays appear (4 text items + brand handled separately)
-      const textItems = page.locator('.text-item');
+      const textItems = page.locator('.elements-panel .layer-item').filter({ has: page.locator('.layer-remove') });
       await expect(textItems.first()).toBeVisible({ timeout: 5000 });
       const textCount = await textItems.count();
       expect(textCount).toBeGreaterThanOrEqual(3);
 
+      // Step 4 (moved up): Verify export preset is selected (TikTok default) — the
+      // default properties panel showing .export-btn is still active at this point.
+      await expect(page.locator('.export-btn').first()).toHaveClass(/active/);
+
       // Step 4: Select brand preset
+      await openBrandPanel(page);
       const brandBtn = page.locator('.brand-btn').first();
       await brandBtn.click();
       await expect(brandBtn).toHaveClass(/active/);
@@ -214,13 +232,10 @@ test.describe('Studio', () => {
       await musicInput.setInputFiles(FIXTURE_MUSIC);
       await page.waitForTimeout(1000);
 
-      // Step 6: Verify export preset is selected (TikTok default)
-      await expect(page.locator('.export-btn').first()).toHaveClass(/active/);
-
       // Step 7: Render
       await page.waitForTimeout(500);
-      await expect(page.locator('.render-btn')).toBeEnabled();
-      await page.locator('.render-btn').click();
+      await expect(page.locator('.render-btn-top')).toBeEnabled();
+      await page.locator('.render-btn-top').click();
 
       // Step 8: Wait for render progress
       await expect(page.locator('.progress-track')).toBeVisible({ timeout: 5000 });
