@@ -44,6 +44,14 @@ export class StudioStore {
     return preset?.signature.defaultMode ?? 'ending';
   });
 
+  readonly musicTracks = computed(() =>
+    this.audioTracks().filter((t) => !t.id.startsWith('sfx')),
+  );
+
+  readonly sfxTracks = computed(() =>
+    this.audioTracks().filter((t) => t.id.startsWith('sfx')),
+  );
+
   readonly brandOverlays = computed(() => {
     const preset = this.selectedPreset();
     const duration = this.totalDuration();
@@ -124,6 +132,12 @@ export class StudioStore {
 
   removeAudioTrack(id: string): void {
     this.audioTracks.update((tracks) => tracks.filter((t) => t.id !== id));
+  }
+
+  updateAudioTrack(id: string, updates: Partial<AudioTrack>): void {
+    this.audioTracks.update((tracks) =>
+      tracks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+    );
   }
 
   setComposition(composition: VideoComposition): void {

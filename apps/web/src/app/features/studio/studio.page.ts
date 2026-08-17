@@ -6,12 +6,13 @@ import { StudioApiService } from './services/studio-api.service';
 import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
+import { AudioPanelComponent } from './audio-panel.component';
 import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent, OverlayEditorComponent],
+  imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent, OverlayEditorComponent, AudioPanelComponent],
   template: `
     <div class="studio-container">
       <header class="studio-header">
@@ -124,20 +125,21 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
             </app-overlay-editor>
           }
 
-          <section class="panel-section">
-            <h3>Audio</h3>
-            <div class="audio-controls">
-              <label class="checkbox-label">
-                <input type="checkbox" [checked]="keepOriginalAudio()" (change)="keepOriginalAudio.set(!keepOriginalAudio())">
-                Mantener audio original
-              </label>
-              <div class="volume-control" *ngIf="keepOriginalAudio()">
-                <label>Volumen original</label>
-                <input type="range" min="0" max="1" step="0.1" [(ngModel)]="originalVolume">
-                <span>{{ originalVolume() * 100 | number:'1.0-0' }}%</span>
-              </div>
-            </div>
-          </section>
+          <app-audio-panel
+            [musicTracks]="store.musicTracks()"
+            [sfxTracks]="store.sfxTracks()"
+            [keepOriginal]="keepOriginalAudio()"
+            [originalVolume]="originalVolume()"
+            [autoDuck]="autoDuck()"
+            [duration]="store.totalDuration()"
+            (toggleOriginal)="keepOriginalAudio.set(!keepOriginalAudio())"
+            (volumeChange)="originalVolume.set($event)"
+            (autoDuckChange)="autoDuck.set(!autoDuck())"
+            (uploadMusic)="onUploadMusic($event)"
+            (uploadSfx)="onUploadSfx($event)"
+            (removeTrack)="store.removeAudioTrack($event)"
+            (updateTrack)="onUpdateAudioTrack($event)">
+          </app-audio-panel>
 
           <section class="panel-section">
             <h3>Exportar</h3>
@@ -261,6 +263,7 @@ export class StudioPageComponent {
   readonly selectedOverlayId = signal<string | null>(null);
   readonly keepOriginalAudio = signal(true);
   readonly originalVolume = signal(1.0);
+  readonly autoDuck = signal(false);
 
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
@@ -433,5 +436,41 @@ export class StudioPageComponent {
   onOverlayRemove(id: string): void {
     this.store.removeTextOverlay(id);
     if (this.selectedOverlayId() === id) this.selectedOverlayId.set(null);
+  }
+
+  onUploadMusic(file: File): void {
+    const formData = new FormData();
+    formData.append('file', file);
+    this.api.uploadAudio(formData).subscribe({
+      next: (res) => {
+        this.store.addAudioTrack({
+          id: crypto.randomUUID(),
+          assetId: res.asset.id,
+          fileName: file.name,
+          startTime: 0,
+          volume: 0.35,
+        });
+      },
+    });
+  }
+
+  onUploadSfx(file: File): void {
+    const formData = new FormData();
+    formData.append('file', file);
+    this.api.uploadAudio(formData).subscribe({
+      next: (res) => {
+        this.store.addAudioTrack({
+          id: `sfx-${crypto.randomUUID()}`,
+          assetId: res.asset.id,
+          fileName: file.name,
+          startTime: 0,
+          volume: 0.5,
+        });
+      },
+    });
+  }
+
+  onUpdateAudioTrack(event: { id: string; changes: Partial<AudioTrack> }): void {
+    this.store.updateAudioTrack(event.id, event.changes);
   }
 }

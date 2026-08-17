@@ -69,4 +69,11 @@ export class StudioApiService {
   getDownloadUrl(renderId: string): string {
     return `${this.baseUrl}/renders/${renderId}/download`;
   }
+
+  uploadAudio(formData: FormData): Observable<{ asset: { id: string; fileName: string; size: number } }> {
+    return this.http.post<{ asset: { id: string; fileName: string; size: number } }>(
+      `${this.baseUrl}/sources/upload`,
+      formData,
+    );
+  }
 }
