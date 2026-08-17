@@ -5,7 +5,7 @@ import { StudioStore } from './state/studio.store';
 import { StudioApiService } from './services/studio-api.service';
 import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
-import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
@@ -78,21 +78,18 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
 
           <section class="panel-section">
             <h3>Textos</h3>
-            <div class="text-overlays">
-              <div *ngFor="let overlay of store.textOverlays()" class="overlay-item">
-                <span class="overlay-text">{{ overlay.text }}</span>
-                <span class="overlay-time">{{ overlay.startTime | number:'1.1-1' }}s - {{ overlay.endTime | number:'1.1-1' }}s</span>
-                <button class="remove-btn" (click)="store.removeTextOverlay(overlay.id)">&times;</button>
-              </div>
+            <div class="preset-chips">
+              @for (preset of textPresets(); track preset.id) {
+                <button
+                  class="preset-chip"
+                  [class.active]="selectedTextPreset()?.id === preset.id"
+                  (click)="selectedTextPreset.set(selectedTextPreset()?.id === preset.id ? null : preset)">
+                  {{ preset.name }}
+                </button>
+              }
             </div>
             <div class="add-text-form">
-              <input [(ngModel)]="newText" placeholder="Agregar texto..." class="text-input">
-              <select [(ngModel)]="newTextType" class="type-select">
-                <option value="message">Mensaje</option>
-                <option value="verse">Versículo</option>
-                <option value="reflection">Reflexión</option>
-                <option value="cta">CTA</option>
-              </select>
+              <input [(ngModel)]="newText" [placeholder]="selectedTextPreset()?.description ?? 'Escribe tu texto...'" class="text-input">
               <button class="add-btn" (click)="addText()" [disabled]="!newText()">Agregar</button>
             </div>
           </section>
@@ -151,6 +148,14 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
     .upload-icon { font-size: 52px; color: var(--color-text-muted); margin-bottom: 16px; transition: color var(--transition-fast); }
     .upload-area:hover .upload-icon { color: var(--color-accent); }
     .upload-hint { color: var(--color-text-muted); font-size: 12px; margin-top: 10px; letter-spacing: 0.02em; }
+    .preset-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .preset-chip {
+      padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 9999px;
+      background: var(--color-bg); color: var(--color-text-secondary); cursor: pointer;
+      font-size: 11px; font-weight: 500; transition: all var(--transition-fast);
+    }
+    .preset-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+    .preset-chip.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
     .config-panel { display: flex; flex-direction: column; gap: 16px; }
     .panel-section { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--color-border-subtle); transition: border-color var(--transition-fast); }
     .panel-section:hover { border-color: var(--color-border); }
@@ -202,14 +207,18 @@ export class StudioPageComponent {
   private readonly api = inject(StudioApiService);
 
   readonly presets = signal<BrandPreset[]>([]);
+  readonly textPresets = signal<TextPreset[]>([]);
   readonly newText = signal('');
-  readonly newTextType = signal<string>('message');
+  readonly selectedTextPreset = signal<TextPreset | null>(null);
   readonly keepOriginalAudio = signal(true);
   readonly originalVolume = signal(1.0);
 
   constructor() {
     this.api.getBrandPresets().subscribe({
       next: (res) => this.presets.set(res.presets),
+    });
+    this.api.getTextPresets().subscribe({
+      next: (res) => this.textPresets.set(res.presets),
     });
   }
 
@@ -238,15 +247,16 @@ export class StudioPageComponent {
     const text = this.newText();
     if (!text) return;
 
+    const preset = this.selectedTextPreset();
     const duration = this.store.totalDuration();
     const overlay: TextOverlay = {
       id: crypto.randomUUID(),
       text,
-      type: this.newTextType() as TextOverlay['type'],
+      type: preset?.type ?? 'message',
       startTime: 0,
       endTime: Math.max(duration, 5),
-      position: 'center',
-      style: {
+      position: preset?.defaultPosition ?? 'center',
+      style: preset?.defaultStyle ?? {
         fontFamily: 'Georgia, "Times New Roman", serif',
         fontSize: 48,
         fontWeight: 'bold',
@@ -254,12 +264,12 @@ export class StudioPageComponent {
         opacity: 1,
         textShadow: true,
         shadowColor: 'rgba(0, 0, 0, 0.8)',
-        shadowBlur: 16,
       },
     };
 
     this.store.addTextOverlay(overlay);
     this.newText.set('');
+    this.selectedTextPreset.set(null);
   }
 
   startRender(): void {

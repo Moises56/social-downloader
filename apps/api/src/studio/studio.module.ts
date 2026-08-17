@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { StudioController } from './presentation/studio.controller';
 import { BrandPresetService } from './application/brand-preset.service';
+import { TextPresetService } from './application/text-preset.service';
 import { TextOverlayService } from './application/text-overlay.service';
 import { AudioMixingService } from './application/audio-mixing.service';
 import { TempAssetStorage } from './infrastructure/storage/temp-asset-storage.service';
@@ -11,6 +12,7 @@ import { FfmpegVideoRenderer } from './infrastructure/ffmpeg/ffmpeg-video-render
   controllers: [StudioController],
   providers: [
     BrandPresetService,
+    TextPresetService,
     TextOverlayService,
     AudioMixingService,
     TempAssetStorage,

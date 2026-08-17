@@ -17,6 +17,7 @@ import { access } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type {
   BrandPresetsResponse,
+  TextPresetsResponse,
   CreateCompositionRequest,
   CreateCompositionResponse,
   StartRenderRequest,
@@ -26,6 +27,7 @@ import type {
   RenderedVideo,
 } from '@social-downloader/contracts';
 import { BrandPresetService } from '../application/brand-preset.service';
+import { TextPresetService } from '../application/text-preset.service';
 import { TextOverlayService } from '../application/text-overlay.service';
 import { AudioMixingService } from '../application/audio-mixing.service';
 import { TempAssetStorage } from '../infrastructure/storage/temp-asset-storage.service';
@@ -38,6 +40,7 @@ const renderJobs = new Map<string, { render: RenderedVideo; composition: VideoCo
 export class StudioController {
   constructor(
     private readonly brandPresets: BrandPresetService,
+    private readonly textPresets: TextPresetService,
     private readonly textOverlays: TextOverlayService,
     private readonly audioMixing: AudioMixingService,
     private readonly storage: TempAssetStorage,
@@ -47,6 +50,11 @@ export class StudioController {
   @Get('brand-presets')
   getBrandPresets(): BrandPresetsResponse {
     return { presets: this.brandPresets.listPresets() };
+  }
+
+  @Get('text-presets')
+  getTextPresets(): TextPresetsResponse {
+    return { presets: this.textPresets.listPresets() };
   }
 
   @Post('sources/upload')

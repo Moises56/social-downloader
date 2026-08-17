@@ -319,6 +319,10 @@ function computePosition(
       return { x: String(leftSafe), y: String(topSafe + fontSize) };
     case 'top-right':
       return { x: `w-text_w-${leftSafe}`, y: String(topSafe + fontSize) };
+    case 'upper-center':
+      return { x: `(w-text_w)/2`, y: String(Math.round(height * 0.30)) };
+    case 'lower-center':
+      return { x: `(w-text_w)/2`, y: String(Math.round(height * 0.65)) };
     case 'center':
       return {
         x: `(w-text_w)/2`,

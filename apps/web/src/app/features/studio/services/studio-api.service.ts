@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import type {
   BrandPresetsResponse,
+  TextPresetsResponse,
   CreateCompositionResponse,
   StartRenderResponse,
   RenderStatusResponse,
@@ -18,6 +19,10 @@ export class StudioApiService {
 
   getBrandPresets(): Observable<BrandPresetsResponse> {
     return this.http.get<BrandPresetsResponse>(`${this.baseUrl}/brand-presets`);
+  }
+
+  getTextPresets(): Observable<TextPresetsResponse> {
+    return this.http.get<TextPresetsResponse>(`${this.baseUrl}/text-presets`);
   }
 
   uploadSource(file: File): Observable<{ asset: { id: string; fileName: string; mimeType: string; size: number; duration?: number; width?: number; height?: number; createdAt: string } }> {

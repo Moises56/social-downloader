@@ -103,9 +103,20 @@ export type OverlayPosition =
   | 'top-left'
   | 'top-right'
   | 'center'
+  | 'upper-center'
+  | 'lower-center'
   | 'custom';
 
 export type OverlayAnimation = 'fade-in' | 'fade-out' | 'slide-up' | 'soft-reveal' | 'none';
+
+export interface TextPreset {
+  id: string;
+  name: string;
+  type: TextOverlay['type'];
+  defaultStyle: TextStyleConfig;
+  defaultPosition: OverlayPosition;
+  description: string;
+}
 
 export interface TextStyleConfig {
   fontFamily: string;
@@ -264,6 +275,10 @@ export interface RenderStatusResponse {
 
 export interface BrandPresetsResponse {
   presets: BrandPreset[];
+}
+
+export interface TextPresetsResponse {
+  presets: TextPreset[];
 }
 
 // ─── Studio Error Codes ─────────────────────────────────────────
