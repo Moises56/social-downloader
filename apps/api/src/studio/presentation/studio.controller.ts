@@ -20,6 +20,7 @@ import type {
   BrandPresetsResponse,
   TextPresetsResponse,
   CompositionPresetsResponse,
+  ExportPresetsResponse,
   CreateCompositionRequest,
   CreateCompositionResponse,
   DuplicateCompositionRequest,
@@ -37,6 +38,7 @@ import type {
 import { BrandPresetService } from '../application/brand-preset.service';
 import { TextPresetService } from '../application/text-preset.service';
 import { CompositionPresetService } from '../application/composition-preset.service';
+import { ExportPresetService } from '../application/export-preset.service';
 import { TextOverlayService } from '../application/text-overlay.service';
 import { AudioMixingService } from '../application/audio-mixing.service';
 import { TempAssetStorage } from '../infrastructure/storage/temp-asset-storage.service';
@@ -53,6 +55,7 @@ export class StudioController {
     private readonly brandPresets: BrandPresetService,
     private readonly textPresets: TextPresetService,
     private readonly compositionPresets: CompositionPresetService,
+    private readonly exportPresets: ExportPresetService,
     private readonly textOverlays: TextOverlayService,
     private readonly audioMixing: AudioMixingService,
     private readonly storage: TempAssetStorage,
@@ -72,6 +75,11 @@ export class StudioController {
   @Get('composition-presets')
   getCompositionPresets(): CompositionPresetsResponse {
     return { presets: this.compositionPresets.listPresets() };
+  }
+
+  @Get('export-presets')
+  getExportPresets(): ExportPresetsResponse {
+    return { presets: this.exportPresets.listPresets() };
   }
 
   @Post('sources/upload')
@@ -139,11 +147,31 @@ export class StudioController {
       duration,
     };
 
+    let output = { ...DEFAULT_OUTPUT };
+    if (body.exportPresetId) {
+      const exportPreset = this.exportPresets.getPreset(body.exportPresetId);
+      if (exportPreset) {
+        output = {
+          ...output,
+          width: exportPreset.width,
+          height: exportPreset.height,
+          fps: exportPreset.fps,
+          crf: exportPreset.crf,
+          preset: exportPreset.preset,
+          audioBitrate: exportPreset.audioBitrate,
+          audioSampleRate: exportPreset.audioSampleRate,
+          audioChannels: exportPreset.audioChannels,
+          movflags: exportPreset.movflags,
+        };
+      }
+    }
+
     const composition: VideoComposition = {
       id: randomUUID(),
       source,
-      output: DEFAULT_OUTPUT,
+      output,
       brandPresetId: body.brandPresetId,
+      exportPresetId: body.exportPresetId,
       overlays: body.overlays ?? [],
       textTracks: body.textTracks ?? [],
       audioTracks: body.audioTracks ?? [],

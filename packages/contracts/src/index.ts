@@ -174,6 +174,30 @@ export interface OutputPreset {
   format: 'mp4';
   videoCodec: 'h264';
   audioCodec: 'aac';
+  crf: number;
+  preset: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow';
+  audioBitrate: string;
+  audioSampleRate: number;
+  audioChannels: number;
+  movflags: string;
+}
+
+export interface ExportPreset {
+  id: string;
+  name: string;
+  description: string;
+  width: number;
+  height: number;
+  fps: number;
+  videoBitrate?: string;
+  crf: number;
+  preset: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow';
+  audioBitrate: string;
+  audioSampleRate: number;
+  audioChannels: number;
+  movflags: string;
+  estimatedSizePerSecond: string;
+  tags: string[];
 }
 
 export interface VideoSource {
@@ -227,6 +251,7 @@ export interface VideoComposition {
   source: VideoSource;
   output: OutputPreset;
   brandPresetId?: string;
+  exportPresetId?: string;
   overlays: BrandOverlay[];
   textTracks: TextOverlay[];
   audioTracks: AudioTrack[];
@@ -268,6 +293,7 @@ export interface StudioAsset {
 export interface CreateCompositionRequest {
   sourceAssetId: string;
   brandPresetId?: string;
+  exportPresetId?: string;
   overlays?: BrandOverlay[];
   textTracks?: TextOverlay[];
   audioTracks?: AudioTrack[];
@@ -337,6 +363,10 @@ export interface SavedCompositionPresetsResponse {
 
 export interface DeleteCompositionPresetRequest {
   presetId: string;
+}
+
+export interface ExportPresetsResponse {
+  presets: ExportPreset[];
 }
 
 // ─── Studio Error Codes ─────────────────────────────────────────

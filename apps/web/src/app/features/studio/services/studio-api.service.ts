@@ -6,6 +6,7 @@ import type {
   BrandPresetsResponse,
   TextPresetsResponse,
   CompositionPresetsResponse,
+  ExportPresetsResponse,
   CreateCompositionResponse,
   DuplicateCompositionResponse,
   StartRenderResponse,
@@ -33,6 +34,10 @@ export class StudioApiService {
     return this.http.get<CompositionPresetsResponse>(`${this.baseUrl}/composition-presets`);
   }
 
+  getExportPresets(): Observable<ExportPresetsResponse> {
+    return this.http.get<ExportPresetsResponse>(`${this.baseUrl}/export-presets`);
+  }
+
   uploadSource(file: File): Observable<{ asset: { id: string; fileName: string; mimeType: string; size: number; duration?: number; width?: number; height?: number; createdAt: string } }> {
     const formData = new FormData();
     formData.append('file', file);
@@ -45,6 +50,7 @@ export class StudioApiService {
   createComposition(params: {
     sourceAssetId: string;
     brandPresetId?: string;
+    exportPresetId?: string;
     textTracks?: TextOverlay[];
     audioTracks?: AudioTrack[];
     keepOriginalAudio?: boolean;

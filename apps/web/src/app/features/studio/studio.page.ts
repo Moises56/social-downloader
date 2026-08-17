@@ -7,7 +7,7 @@ import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
-import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
@@ -143,8 +143,18 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
 
           <section class="panel-section">
             <h3>Exportar</h3>
-            <div class="export-info">
-              <span>1080x1920 &bull; 9:16 &bull; MP4 &bull; H.264</span>
+            <div class="export-preset-grid">
+              @for (preset of exportPresets(); track preset.id) {
+                <button
+                  class="export-preset-btn"
+                  [class.active]="store.selectedExportPreset()?.id === preset.id"
+                  (click)="store.setExportPreset(preset)">
+                  <span class="ep-name">{{ preset.name }}</span>
+                  <span class="ep-desc">{{ preset.description }}</span>
+                  <span class="ep-meta">{{ preset.width }}x{{ preset.height }} &bull; {{ preset.fps }}fps &bull; CRF {{ preset.crf }}</span>
+                  <span class="ep-est">~{{ preset.estimatedSizePerSecond }}</span>
+                </button>
+              }
             </div>
             <label class="checkbox-label" style="margin-bottom: 14px;">
               <input type="checkbox" [checked]="store.showSafeZones()" (change)="store.showSafeZones.set(!store.showSafeZones())">
@@ -279,6 +289,19 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .volume-control input[type="range"] { flex: 1; accent-color: var(--color-accent); }
     .volume-control span { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
     .export-info { font-size: 12px; color: var(--color-text-muted); margin-bottom: 14px; text-align: center; letter-spacing: 0.03em; }
+    .export-preset-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .export-preset-btn {
+      display: flex; flex-direction: column; align-items: flex-start;
+      padding: 12px 14px; background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); cursor: pointer; text-align: left;
+      transition: all var(--transition-fast);
+    }
+    .export-preset-btn:hover { border-color: var(--color-accent); }
+    .export-preset-btn.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
+    .ep-name { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+    .ep-desc { font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
+    .ep-meta { font-size: 10px; color: var(--color-text-secondary); margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .ep-est { font-size: 10px; color: var(--color-text-muted); font-style: italic; }
     .render-btn { width: 100%; padding: 16px; background: linear-gradient(135deg, var(--color-accent), #2563eb); border: none; border-radius: var(--radius-md); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; transition: all var(--transition-fast); letter-spacing: 0.01em; }
     .render-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 20px var(--color-accent-glow); }
     .render-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
@@ -354,6 +377,7 @@ export class StudioPageComponent {
   readonly presets = signal<BrandPreset[]>([]);
   readonly textPresets = signal<TextPreset[]>([]);
   readonly compositionPresets = signal<CompositionPreset[]>([]);
+  readonly exportPresets = signal<ExportPreset[]>([]);
   readonly newText = signal('');
   readonly selectedTextPreset = signal<TextPreset | null>(null);
   readonly selectedOverlayId = signal<string | null>(null);
@@ -378,6 +402,13 @@ export class StudioPageComponent {
     });
     this.api.getCompositionPresets().subscribe({
       next: (res) => this.compositionPresets.set(res.presets),
+    });
+    this.api.getExportPresets().subscribe({
+      next: (res) => {
+        this.exportPresets.set(res.presets);
+        const tiktok = res.presets.find((p) => p.id === 'tiktok-reels-shorts');
+        if (tiktok) this.store.setExportPreset(tiktok);
+      },
     });
     this.api.getSavedPresets().subscribe({
       next: (res) => this.store.setSavedPresets(res.presets),
@@ -444,6 +475,7 @@ export class StudioPageComponent {
     this.api.createComposition({
       sourceAssetId: asset.id,
       brandPresetId: this.store.selectedPreset()?.id,
+      exportPresetId: this.store.selectedExportPreset()?.id,
       textTracks: this.store.textOverlays(),
       audioTracks: this.store.audioTracks(),
       keepOriginalAudio: this.keepOriginalAudio(),

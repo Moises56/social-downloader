@@ -74,17 +74,26 @@ export function buildRenderCommand(
 
   args.push(
     '-c:v', 'libx264',
-    '-preset', 'fast',
-    '-crf', '23',
+    '-preset', output.preset ?? 'fast',
+    '-crf', String(output.crf ?? 23),
     '-pix_fmt', 'yuv420p',
     '-r', String(output.fps),
   );
 
   if (hasAudioTracks || hasOriginalAudio) {
-    args.push('-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2');
+    args.push(
+      '-c:a', 'aac',
+      '-b:a', output.audioBitrate ?? '192k',
+      '-ar', String(output.audioSampleRate ?? 48000),
+      '-ac', String(output.audioChannels ?? 2),
+    );
   }
 
-  args.push('-movflags', '+faststart');
+  if (output.movflags) {
+    args.push('-movflags', output.movflags);
+  } else {
+    args.push('-movflags', '+faststart');
+  }
   args.push(outputPath);
 
   return { args };

@@ -33,10 +33,16 @@ export type CompositionPreset = ICompositionPreset;
 export const DEFAULT_OUTPUT: OutputPreset = {
   width: 1080,
   height: 1920,
-  fps: 24,
+  fps: 30,
   format: 'mp4',
   videoCodec: 'h264',
   audioCodec: 'aac',
+  crf: 23,
+  preset: 'fast',
+  audioBitrate: '128k',
+  audioSampleRate: 48000,
+  audioChannels: 2,
+  movflags: '+faststart',
 };
 
 export const DEFAULT_BRAND_PRESET: BrandPreset = {

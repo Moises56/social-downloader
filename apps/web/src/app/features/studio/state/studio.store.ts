@@ -6,6 +6,7 @@ import type {
   AudioTrack,
   RenderedVideo,
   SavedCompositionPreset,
+  ExportPreset,
 } from '@social-downloader/contracts';
 
 export interface StudioAsset {
@@ -33,6 +34,7 @@ export class StudioStore {
   readonly showSafeZones = signal<boolean>(false);
   readonly savedPresets = signal<SavedCompositionPreset[]>([]);
   readonly brandPresetId = signal<string | null>(null);
+  readonly selectedExportPreset = signal<ExportPreset | null>(null);
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
@@ -109,6 +111,10 @@ export class StudioStore {
 
   setPreset(preset: BrandPreset | null): void {
     this.selectedPreset.set(preset);
+  }
+
+  setExportPreset(preset: ExportPreset | null): void {
+    this.selectedExportPreset.set(preset);
   }
 
   addTextOverlay(overlay: TextOverlay): void {
