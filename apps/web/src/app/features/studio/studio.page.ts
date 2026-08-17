@@ -3,12 +3,13 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StudioStore } from './state/studio.store';
 import { StudioApiService } from './services/studio-api.service';
+import { VideoPreviewComponent } from './video-preview.component';
 import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, VideoPreviewComponent],
   template: `
     <div class="studio-container">
       <header class="studio-header">
@@ -18,20 +19,22 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
 
       <div class="studio-layout">
         <div class="preview-panel">
-          <div class="preview-area" *ngIf="store.sourceAsset() as asset; else uploadPlaceholder">
-            <div class="video-placeholder">
-              <div class="video-icon">&#9654;</div>
-              <p class="video-name">{{ asset.fileName }}</p>
-              <p class="video-meta" *ngIf="asset.duration">{{ asset.duration | number:'1.1-1' }}s</p>
-            </div>
-          </div>
-          <ng-template #uploadPlaceholder>
+          @if (store.sourceVideoUrl(); as videoUrl) {
+            <app-video-preview
+              [src]="videoUrl"
+              [textOverlays]="store.textOverlays()"
+              [brandOverlays]="store.brandOverlays()"
+              [duration]="store.totalDuration()"
+              [showSafeZones]="store.showSafeZones()"
+              (timeChange)="store.currentTime.set($event)">
+            </app-video-preview>
+          } @else {
             <div class="upload-area" (click)="fileInput.click()" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
               <div class="upload-icon">&#43;</div>
               <p>Sube un video o arrastra aquí</p>
               <p class="upload-hint">MP4, MOV, WebM</p>
             </div>
-          </ng-template>
+          }
           <input #fileInput type="file" accept="video/*" (change)="onFileSelected($event)" hidden>
         </div>
 
@@ -101,6 +104,10 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
             <div class="export-info">
               <span>1080x1920 &bull; 9:16 &bull; MP4 &bull; H.264</span>
             </div>
+            <label class="checkbox-label" style="margin-bottom: 14px;">
+              <input type="checkbox" [checked]="store.showSafeZones()" (change)="store.showSafeZones.set(!store.showSafeZones())">
+              Mostrar zonas seguras
+            </label>
             <button
               class="render-btn"
               [disabled]="!store.canRender()"
@@ -125,16 +132,12 @@ import type { BrandPreset, TextOverlay, AudioTrack } from '@social-downloader/co
     .studio-header h1 { font-size: 32px; font-weight: 700; color: var(--color-text-primary); margin: 0 0 8px; letter-spacing: -0.02em; }
     .subtitle { color: var(--color-text-secondary); font-size: 15px; margin: 0; }
     .studio-layout { display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start; }
-    .preview-panel { background: var(--color-surface); border-radius: var(--radius-lg); min-height: 560px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border-subtle); }
-    .upload-area { text-align: center; padding: 56px 32px; cursor: pointer; border: 2px dashed var(--color-border); border-radius: var(--radius-lg); margin: 20px; transition: all var(--transition-normal); }
+    .preview-panel { border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--color-border-subtle); }
+    .upload-area { text-align: center; padding: 120px 32px; cursor: pointer; border: 2px dashed var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); transition: all var(--transition-normal); }
     .upload-area:hover { border-color: var(--color-accent); background: var(--color-accent-glow); }
     .upload-icon { font-size: 52px; color: var(--color-text-muted); margin-bottom: 16px; transition: color var(--transition-fast); }
     .upload-area:hover .upload-icon { color: var(--color-accent); }
     .upload-hint { color: var(--color-text-muted); font-size: 12px; margin-top: 10px; letter-spacing: 0.02em; }
-    .video-placeholder { text-align: center; padding: 40px; }
-    .video-icon { font-size: 72px; color: var(--color-accent); margin-bottom: 20px; opacity: 0.9; }
-    .video-name { font-weight: 600; color: var(--color-text-primary); margin: 0 0 6px; font-size: 15px; }
-    .video-meta { color: var(--color-text-secondary); font-size: 13px; margin: 0; }
     .config-panel { display: flex; flex-direction: column; gap: 16px; }
     .panel-section { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--color-border-subtle); transition: border-color var(--transition-fast); }
     .panel-section:hover { border-color: var(--color-border); }
@@ -212,8 +215,9 @@ export class StudioPageComponent {
   }
 
   uploadFile(file: File): void {
+    const videoUrl = URL.createObjectURL(file);
     this.api.uploadSource(file).subscribe({
-      next: (res) => this.store.setSource(res.asset),
+      next: (res) => this.store.setSource(res.asset, videoUrl),
     });
   }
 

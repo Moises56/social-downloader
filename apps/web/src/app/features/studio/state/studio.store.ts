@@ -20,6 +20,7 @@ export interface StudioAsset {
 @Injectable({ providedIn: 'root' })
 export class StudioStore {
   readonly sourceAsset = signal<StudioAsset | null>(null);
+  readonly sourceVideoUrl = signal<string | null>(null);
   readonly selectedPreset = signal<BrandPreset | null>(null);
   readonly textOverlays = signal<TextOverlay[]>([]);
   readonly audioTracks = signal<AudioTrack[]>([]);
@@ -27,6 +28,8 @@ export class StudioStore {
   readonly renderState = signal<'idle' | 'rendering' | 'success' | 'error'>('idle');
   readonly renderResult = signal<RenderedVideo | null>(null);
   readonly renderProgress = signal<number>(0);
+  readonly currentTime = signal<number>(0);
+  readonly showSafeZones = signal<boolean>(false);
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
@@ -41,8 +44,53 @@ export class StudioStore {
     return preset?.signature.defaultMode ?? 'ending';
   });
 
-  setSource(asset: StudioAsset): void {
+  readonly brandOverlays = computed(() => {
+    const preset = this.selectedPreset();
+    const duration = this.totalDuration();
+    if (!preset || !duration) return [];
+
+    const mode = preset.signature.defaultMode;
+    const style = preset.signature.style ?? {
+      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontSize: 32,
+      fontWeight: 'normal',
+      italic: true,
+      color: '#f6efe2',
+      opacity: 0.62,
+      textShadow: true,
+      shadowColor: 'rgba(0, 0, 0, 0.75)',
+    };
+
+    if (mode === 'ending') {
+      return [{
+        id: 'brand-preview',
+        presetId: preset.id,
+        text: preset.signature.text,
+        startTime: Math.max(0, duration - 2.5),
+        endTime: duration,
+        position: preset.signature.defaultPosition,
+        style,
+        opacity: style.opacity,
+      }];
+    }
+    if (mode === 'persistent') {
+      return [{
+        id: 'brand-preview',
+        presetId: preset.id,
+        text: preset.signature.text,
+        startTime: 0.5,
+        endTime: duration - 0.5,
+        position: preset.signature.defaultPosition,
+        style,
+        opacity: style.opacity,
+      }];
+    }
+    return [];
+  });
+
+  setSource(asset: StudioAsset, videoUrl?: string): void {
     this.sourceAsset.set(asset);
+    if (videoUrl) this.sourceVideoUrl.set(videoUrl);
     this.composition.set(null);
     this.renderResult.set(null);
     this.renderState.set('idle');
