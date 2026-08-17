@@ -17,6 +17,7 @@ export interface RunMediaToolResult {
 
 const FFMPEG_CANDIDATES = [
   process.env.FFMPEG_BINARY,
+  '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg',
   '/opt/homebrew/bin/ffmpeg',
   '/usr/local/bin/ffmpeg',
   '/usr/bin/ffmpeg',
@@ -25,6 +26,7 @@ const FFMPEG_CANDIDATES = [
 
 const FFPROBE_CANDIDATES = [
   process.env.FFPROBE_BINARY,
+  '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe',
   '/opt/homebrew/bin/ffprobe',
   '/usr/local/bin/ffprobe',
   '/usr/bin/ffprobe',

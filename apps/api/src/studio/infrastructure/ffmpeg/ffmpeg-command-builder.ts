@@ -4,6 +4,19 @@ export interface FfmpegCommand {
   args: string[];
 }
 
+/**
+ * Escape text for FFmpeg drawtext filter.
+ * Since we use spawn() with shell: false, only FFmpeg filter escaping is needed.
+ */
+function escapeDrawText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "'\\\\''")
+    .replace(/:/g, '\\:')
+    .replace(/%/g, '%%')
+    .replace(/\n/g, '\\n');
+}
+
 export function buildRenderCommand(
   composition: VideoComposition,
   sourcePath: string,
@@ -48,13 +61,15 @@ export function buildRenderCommand(
 
   if (hasAudioTracks || hasOriginalAudio) {
     const audioFilters = buildAudioFilters(composition);
-    const allFilters = [...videoFilters, ...audioFilters];
+    const videoChain = `[0:v]${videoFilters.join(',')}[vout]`;
+    const allFilters = [videoChain, ...audioFilters];
     args.push('-filter_complex', allFilters.join(';'));
-    args.push('-map', '0:v');
+    args.push('-map', '[vout]');
     args.push('-map', '[aout]');
   } else {
-    args.push('-filter_complex', videoFilters.join(','));
-    args.push('-an');
+    const videoChain = `[0:v]${videoFilters.join(',')}[vout]`;
+    args.push('-filter_complex', videoChain);
+    args.push('-map', '[vout]');
   }
 
   args.push(
@@ -139,14 +154,10 @@ function buildTextOverlayFilters(
   const filters: string[] = [];
   const pos = computePosition(text.position, text.customPosition, width, height, text.style.fontSize);
 
-  const escaped = text.text
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/:/g, '\\:');
+  const escaped = escapeDrawText(text.text);
 
   const drawtext = [
     `drawtext=text='${escaped}'`,
-    `fontfile=`,
     `fontsize=${text.style.fontSize}`,
     `fontcolor=${text.style.color}@${text.style.opacity}`,
     `x=${pos.x}`,
@@ -163,7 +174,7 @@ function buildTextOverlayFilters(
     drawtext.push(`spacing=${text.style.letterSpacing}`);
   }
 
-  const startFilter = `enable='between(t,${text.startTime},${text.endTime})'`;
+  const startFilter = `enable='between(t\\,${text.startTime}\\,${text.endTime})'`;
   drawtext.push(startFilter);
 
   filters.push(drawtext.join(':'));
@@ -179,47 +190,99 @@ function buildBrandOverlayFilters(
   const filters: string[] = [];
   const pos = computePosition(brand.position, undefined, width, height, brand.style.fontSize);
 
-  const escaped = brand.text
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/:/g, '\\:');
+  const escaped = escapeDrawText(brand.text);
 
   const fadeInDuration = brand.animationIn === 'fade-in' ? 0.5 : 0;
   const fadeOutDuration = brand.animationOut === 'fade-out' ? 0.5 : 0;
 
-  const alphaExpr = buildAlphaExpression(
-    brand.startTime,
-    brand.endTime,
-    brand.opacity,
-    fadeInDuration,
-    fadeOutDuration,
-  );
+  const phases = buildBrandPhases(brand.startTime, brand.endTime, brand.opacity, fadeInDuration, fadeOutDuration);
 
-  const drawtext = [
-    `drawtext=text='${escaped}'`,
-    `fontfile=`,
-    `fontsize=${brand.style.fontSize}`,
-    `fontcolor=${brand.style.color}@${alphaExpr}`,
-    `x=${pos.x}`,
-    `y=${pos.y}`,
-  ];
+  for (const phase of phases) {
+    const drawtext = [
+      `drawtext=text='${escaped}'`,
+      `fontsize=${brand.style.fontSize}`,
+      `fontcolor=${brand.style.color}@${phase.opacity}`,
+      `x=${pos.x}`,
+      `y=${pos.y}`,
+    ];
 
-  if (brand.style.textShadow) {
-    drawtext.push(`shadowcolor=${brand.style.shadowColor ?? 'black@0.75'}`);
-    drawtext.push(`shadowx=0`);
-    drawtext.push(`shadowy=2`);
+    if (brand.style.textShadow) {
+      drawtext.push(`shadowcolor=${brand.style.shadowColor ?? 'black@0.75'}`);
+      drawtext.push(`shadowx=0`);
+      drawtext.push(`shadowy=2`);
+    }
+
+    if (brand.style.letterSpacing) {
+      drawtext.push(`spacing=${Math.round(brand.style.letterSpacing * 100)}`);
+    }
+
+    drawtext.push(`enable='between(t\\,${phase.start}\\,${phase.end})'`);
+
+    filters.push(drawtext.join(':'));
   }
-
-  if (brand.style.letterSpacing) {
-    drawtext.push(`spacing=${Math.round(brand.style.letterSpacing * 100)}`);
-  }
-
-  const startFilter = `enable='between(t,${brand.startTime},${brand.endTime})'`;
-  drawtext.push(startFilter);
-
-  filters.push(drawtext.join(':'));
 
   return filters;
+}
+
+interface BrandPhase {
+  start: number;
+  end: number;
+  opacity: number;
+}
+
+function buildBrandPhases(
+  start: number,
+  end: number,
+  baseOpacity: number,
+  fadeInSec: number,
+  fadeOutSec: number,
+): BrandPhase[] {
+  if (fadeInSec === 0 && fadeOutSec === 0) {
+    return [{ start, end, opacity: baseOpacity }];
+  }
+
+  const phases: BrandPhase[] = [];
+  const fadeInEnd = start + fadeInSec;
+  const fadeOutStart = end - fadeOutSec;
+
+  if (fadeInSec > 0) {
+    // Split fade-in into 5 steps
+    const steps = 5;
+    const stepDuration = fadeInSec / steps;
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const opacity = baseOpacity * (t + 1 / steps);
+      phases.push({
+        start: start + i * stepDuration,
+        end: start + (i + 1) * stepDuration,
+        opacity: Math.round(opacity * 100) / 100,
+      });
+    }
+  }
+
+  // Stable phase
+  const stableStart = fadeInSec > 0 ? fadeInEnd : start;
+  const stableEnd = fadeOutSec > 0 ? fadeOutStart : end;
+  if (stableStart < stableEnd) {
+    phases.push({ start: stableStart, end: stableEnd, opacity: baseOpacity });
+  }
+
+  if (fadeOutSec > 0) {
+    // Split fade-out into 5 steps
+    const steps = 5;
+    const stepDuration = fadeOutSec / steps;
+    for (let i = 0; i < steps; i++) {
+      const t = 1 - (i + 1) / steps;
+      const opacity = baseOpacity * t;
+      phases.push({
+        start: fadeOutStart + i * stepDuration,
+        end: fadeOutStart + (i + 1) * stepDuration,
+        opacity: Math.round(opacity * 100) / 100,
+      });
+    }
+  }
+
+  return phases;
 }
 
 function computePosition(
@@ -280,36 +343,4 @@ export function buildProbeCommand(filePath: string): FfmpegCommand {
   };
 }
 
-function buildAlphaExpression(
-  start: number,
-  end: number,
-  baseOpacity: number,
-  fadeInSec: number,
-  fadeOutSec: number,
-): string {
-  if (fadeInSec === 0 && fadeOutSec === 0) {
-    return String(baseOpacity);
-  }
 
-  const fadeInEnd = start + fadeInSec;
-  const fadeOutStart = end - fadeOutSec;
-  const parts: string[] = [];
-
-  if (fadeInSec > 0) {
-    parts.push(`if(between(t,${start},${fadeInEnd}),${baseOpacity}*((t-${start})/${fadeInSec}),0)`);
-  }
-
-  if (fadeOutSec > 0) {
-    if (fadeInSec > 0) {
-      parts.push(`+if(between(t,${fadeInEnd},${fadeOutStart}),${baseOpacity},0)`);
-      parts.push(`+if(between(t,${fadeOutStart},${end}),${baseOpacity}*(1-(t-${fadeOutStart})/${fadeOutSec}),0)`);
-    } else {
-      parts.push(`if(between(t,${start},${fadeOutStart}),${baseOpacity},0)`);
-      parts.push(`+if(between(t,${fadeOutStart},${end}),${baseOpacity}*(1-(t-${fadeOutStart})/${fadeOutSec}),0)`);
-    }
-  } else if (fadeInSec > 0) {
-    parts.push(`+if(between(t,${fadeInEnd},${end}),${baseOpacity},0)`);
-  }
-
-  return parts.join('');
-}

@@ -1,13 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 import type {
   BrandPresetsResponse,
   CreateCompositionResponse,
   StartRenderResponse,
   RenderStatusResponse,
-  BrandPreset,
-  VideoComposition,
   TextOverlay,
   AudioTrack,
 } from '@social-downloader/contracts';
@@ -15,7 +14,7 @@ import type {
 @Injectable({ providedIn: 'root' })
 export class StudioApiService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = '/api/studio';
+  private readonly baseUrl = `${environment.apiBaseUrl}/api/studio`;
 
   getBrandPresets(): Observable<BrandPresetsResponse> {
     return this.http.get<BrandPresetsResponse>(`${this.baseUrl}/brand-presets`);

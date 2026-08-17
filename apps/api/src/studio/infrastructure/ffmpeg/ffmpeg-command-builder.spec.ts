@@ -23,7 +23,8 @@ describe('ffmpeg-command-builder', () => {
     expect(args).toContain('/out/video.mp4');
     expect(args).toContain('-c:v');
     expect(args).toContain('libx264');
-    expect(args).toContain('-an');
+    expect(args).toContain('-map');
+    expect(args).toContain('[vout]');
   });
 
   it('includes audio codec when keepOriginalAudio is true', () => {
