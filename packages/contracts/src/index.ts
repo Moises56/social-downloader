@@ -150,6 +150,9 @@ export interface TextStyleConfig {
   padding?: number;
   borderRadius?: number;
   letterSpacing?: number;
+  /** Renders a soft blurred halo (in `shadowColor`, sized by `shadowBlur`) behind the
+   * crisp `color` core — the warm glow look used for devotional quote cards. */
+  glow?: boolean;
 }
 
 export interface BrandSignatureConfig {

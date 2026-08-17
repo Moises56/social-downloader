@@ -1,4 +1,5 @@
-import type { VideoComposition, TextOverlay, BrandOverlay } from '../../domain/video-composition';
+import { execFileSync } from 'node:child_process';
+import type { VideoComposition, TextOverlay, BrandOverlay, TextStyleConfig } from '../../domain/video-composition';
 
 export interface FfmpegCommand {
   args: string[];
@@ -7,14 +8,21 @@ export interface FfmpegCommand {
 /**
  * Escape text for FFmpeg drawtext filter.
  * Since we use spawn() with shell: false, only FFmpeg filter escaping is needed.
+ *
+ * Newlines are deliberately left as real `\n` bytes, NOT escaped to the two-character
+ * `\n` sequence: that sequence is a convenience the ffmpeg CLI's command-line string
+ * parser offers when you can't type a literal newline into a shell command. We pass
+ * args as an array via spawn() with no shell involved, so drawtext's own filtergraph
+ * parser sees the raw text bytes directly — a literal newline already renders as a
+ * line break, and escaping it to `\n` instead makes drawtext print a literal "n" and
+ * silently drop the line break (confirmed by rendering both ways).
  */
 function escapeDrawText(text: string): string {
   return text
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "'\\\\''")
     .replace(/:/g, '\\:')
-    .replace(/%/g, '%%')
-    .replace(/\n/g, '\\n');
+    .replace(/%/g, '%%');
 }
 
 /**
@@ -35,11 +43,61 @@ function sanitizeColorForFfmpeg(color: string): string {
 /**
  * Extract the primary font name from a CSS font-family string.
  * Example: 'Georgia, "Times New Roman", serif' → 'Georgia'
- * FFmpeg drawtext uses the `font` parameter with fontconfig resolution.
  */
 function resolveFontName(fontFamily: string): string {
   const first = fontFamily.split(',')[0]?.trim() ?? 'Sans';
   return first.replace(/^["']|["']$/g, '');
+}
+
+const fontFileCache = new Map<string, string | null>();
+
+/**
+ * Resolve a CSS font-family + weight/style to an actual font FILE path via fontconfig,
+ * so bold/italic are genuinely rendered (drawtext's `font=<name>` parameter only does a
+ * family-name lookup — it silently ignores style, always rendering the regular cut).
+ * `fontfile=<path>` is unambiguous and sidesteps quoting a `:style=...` fontconfig
+ * pattern through drawtext's own `:`-delimited option syntax.
+ *
+ * Returns null (falls back to `font=<name>`, i.e. the old behavior) if `fc-match` isn't
+ * available on the host — keeps rendering working in environments without fontconfig's
+ * CLI tools instead of failing the render.
+ */
+function resolveFontFile(fontFamily: string, bold: boolean, italic: boolean): string | null {
+  const family = resolveFontName(fontFamily);
+  const styleParts: string[] = [];
+  if (bold) styleParts.push('Bold');
+  if (italic) styleParts.push('Italic');
+  const pattern = styleParts.length > 0 ? `${family}:style=${styleParts.join(' ')}` : family;
+
+  if (fontFileCache.has(pattern)) return fontFileCache.get(pattern) ?? null;
+
+  try {
+    const out = execFileSync('fc-match', ['-f', '%{file}', pattern], {
+      encoding: 'utf8',
+      timeout: 3000,
+    }).trim();
+    fontFileCache.set(pattern, out || null);
+    return out || null;
+  } catch {
+    fontFileCache.set(pattern, null);
+    return null;
+  }
+}
+
+/** Escapes a filesystem path for use inside a single-quoted FFmpeg filter option value. */
+function escapeFontFilePath(path: string): string {
+  return path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
+ * Builds the `fontfile='...'` (preferred) or `font=Name` (fallback) drawtext clause for
+ * a given style, so every drawtext call site renders bold/italic consistently instead of
+ * each duplicating the resolution logic inline.
+ */
+function fontClause(fontFamily: string, fontWeight: string | undefined, italic: boolean | undefined): string {
+  const bold = fontWeight === 'bold';
+  const file = resolveFontFile(fontFamily, bold, italic ?? false);
+  return file ? `fontfile='${escapeFontFilePath(file)}'` : `font=${resolveFontName(fontFamily)}`;
 }
 
 export function buildRenderCommand(
@@ -241,8 +299,12 @@ function buildTextOverlayFilters(
   const fadeInDuration = animation !== 'none' ? 0.4 : 0;
   const fadeOutDuration = fadeOut !== 'none' ? 0.4 : 0;
 
+  if (text.style.glow && animation === 'none' && fadeOut === 'none') {
+    return buildGlowTextFilters(text.text, text.style, basePos, width, height, inputLabel, `t${overlayIndex}`, text.startTime, text.endTime);
+  }
+
   if (animation === 'none' && fadeOut === 'none') {
-    filters.push(`${inputLabel}drawtext=text='${escaped}':font=${resolveFontName(text.style.fontFamily)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
+    filters.push(`${inputLabel}drawtext=text='${escaped}':${fontClause(text.style.fontFamily, text.style.fontWeight, text.style.italic)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${text.style.opacity}:x=${basePos.x}:y=${basePos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${text.startTime}\\,${text.endTime})'[t${overlayIndex}]`);
   } else {
     const phases = buildTextPhases(text.startTime, text.endTime, text.style.opacity, fadeInDuration, fadeOutDuration);
     let currentLabel = inputLabel;
@@ -257,12 +319,57 @@ function buildTextOverlayFilters(
         : basePos;
       const isLast = i === phases.length - 1;
       const outLabel = isLast ? `[t${overlayIndex}]` : `[tp${overlayIndex}_${i}]`;
-      filters.push(`${currentLabel}drawtext=text='${escaped}':font=${resolveFontName(text.style.fontFamily)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
+      filters.push(`${currentLabel}drawtext=text='${escaped}':${fontClause(text.style.fontFamily, text.style.fontWeight, text.style.italic)}:fontsize=${text.style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(text.style.color)}@${phase.opacity}:x=${pos.x}:y=${pos.y}${text.style.textShadow ? `:shadowcolor=${sanitizeColorForFfmpeg(text.style.shadowColor ?? 'black@0.8')}:shadowx=2:shadowy=2` : ''}:enable='between(t\\,${phase.start}\\,${phase.end})'${outLabel}`);
       currentLabel = outLabel;
     }
   }
 
   return filters;
+}
+
+/**
+ * Renders text with a soft blurred glow halo behind a crisp core — the warm
+ * amber-on-serif look used for devotional quote cards. Drawtext alone can't blur
+ * (its `shadowx/shadowy` are solid offsets, not gaussian blur), so this composes it
+ * from primitives instead:
+ *   1. draw the text (opaque, `shadowColor`) onto a fully transparent canvas
+ *   2. gblur that layer — only the text silhouette blurs, not the video underneath
+ *   3. overlay the blurred glow onto the video
+ *   4. draw the crisp core text on top, in `color`, for definition
+ * Only used for the simple (non-animated) case — see the `glow` guard at the call site.
+ */
+function buildGlowTextFilters(
+  text: string,
+  style: TextStyleConfig,
+  pos: { x: string; y: string },
+  width: number,
+  height: number,
+  inputLabel: string,
+  outputLabel: string,
+  startTime: number,
+  endTime: number,
+): string[] {
+  const escaped = escapeDrawText(text);
+  const clause = fontClause(style.fontFamily, style.fontWeight, style.italic);
+  const glowColor = sanitizeColorForFfmpeg(style.shadowColor ?? style.color);
+  const blurSigma = style.shadowBlur && style.shadowBlur > 0 ? style.shadowBlur : 8;
+  const enable = `enable='between(t\\,${startTime}\\,${endTime})'`;
+
+  const canvasLabel = `${outputLabel}_glowcanvas`;
+  const glowTextLabel = `${outputLabel}_glowtext`;
+  const glowBlurLabel = `${outputLabel}_glowblur`;
+  const stepLabel = `${outputLabel}_step`;
+
+  return [
+    `color=c=black@0.0:s=${width}x${height}:d=999,format=rgba[${canvasLabel}]`,
+    `[${canvasLabel}]drawtext=text='${escaped}':${clause}:fontsize=${style.fontSize}:fontcolor=${glowColor}@1.0:x=${pos.x}:y=${pos.y}:${enable}[${glowTextLabel}]`,
+    `[${glowTextLabel}]gblur=sigma=${blurSigma}[${glowBlurLabel}]`,
+    // shortest=1: the glow canvas is a d=999 generator (no natural end, like the
+    // existing fit-background canvas above) — without this the whole graph runs to
+    // the generator's length instead of the real video's, duplicating its last frame.
+    `${inputLabel}[${glowBlurLabel}]overlay=0:0:shortest=1[${stepLabel}]`,
+    `[${stepLabel}]drawtext=text='${escaped}':${clause}:fontsize=${style.fontSize}:fontcolor=${sanitizeColorForFfmpeg(style.color)}@${style.opacity}:x=${pos.x}:y=${pos.y}:shadowcolor=black@0.6:shadowx=2:shadowy=2:${enable}[${outputLabel}]`,
+  ];
 }
 
 function buildTextPhases(
@@ -330,6 +437,10 @@ function buildBrandOverlayFilters(
   const fadeInDuration = brand.animationIn === 'fade-in' ? 0.5 : 0;
   const fadeOutDuration = brand.animationOut === 'fade-out' ? 0.5 : 0;
 
+  if (brand.style.glow && fadeInDuration === 0 && fadeOutDuration === 0) {
+    return buildGlowTextFilters(brand.text, brand.style, pos, width, height, inputLabel, `b${overlayIndex}`, brand.startTime, brand.endTime);
+  }
+
   const phases = buildBrandPhases(brand.startTime, brand.endTime, brand.opacity, fadeInDuration, fadeOutDuration);
 
   let currentLabel = inputLabel;
@@ -339,7 +450,7 @@ function buildBrandOverlayFilters(
     const outLabel = isLast ? `[b${overlayIndex}]` : `[bp${overlayIndex}_${i}]`;
     const drawtext = [
       `${currentLabel}drawtext=text='${escaped}'`,
-      `font=${resolveFontName(brand.style.fontFamily)}`,
+      fontClause(brand.style.fontFamily, brand.style.fontWeight, brand.style.italic),
       `fontsize=${brand.style.fontSize}`,
       `fontcolor=${sanitizeColorForFfmpeg(brand.style.color)}@${phase.opacity}`,
       `x=${pos.x}`,

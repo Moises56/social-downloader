@@ -197,4 +197,125 @@ describe('ffmpeg-command-builder', () => {
     expect(filterStr).not.toContain('NaN');
     expect(filterStr).toContain('text_h/2');
   });
+
+  it('resolves a real font FILE (not just a family name) when bold/italic is requested, so the render actually looks bold/italic instead of silently ignoring it', () => {
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-bold-italic',
+          text: 'Styled',
+          type: 'message' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'center' as const,
+          style: {
+            fontFamily: 'Georgia, "Times New Roman", serif',
+            fontSize: 48,
+            fontWeight: 'bold' as const,
+            italic: true,
+            color: '#ffffff',
+            opacity: 1,
+          },
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    // font=Georgia alone (fontconfig family lookup) silently drops style — this must
+    // resolve to an actual font file instead, whatever it is on this host.
+    expect(filterStr).toContain('fontfile=');
+    expect(filterStr).not.toContain('font=Georgia:');
+  });
+
+  it('renders literal newlines in overlay text as real line breaks, not the literal two-character sequence "\\n"', () => {
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-multiline',
+          text: 'Line one\nLine two',
+          type: 'message' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'center' as const,
+          style: {
+            fontFamily: 'Arial',
+            fontSize: 48,
+            color: '#ffffff',
+            opacity: 1,
+          },
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    // spawn() with shell:false passes args straight through with no shell layer, so
+    // drawtext's own filtergraph parser needs a real newline byte to break the line —
+    // escaping it to the two-char "\n" sequence prints a literal "n" instead (verified
+    // by rendering both ways) and silently drops the line break.
+    expect(filterStr).toContain('Line one\nLine two');
+  });
+
+  it('builds a glow filter chain (transparent canvas + blur + overlay + crisp core) when style.glow is set', () => {
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-glow',
+          text: 'Glowing',
+          type: 'verse' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'center' as const,
+          style: {
+            fontFamily: 'Georgia, "Times New Roman", serif',
+            fontSize: 48,
+            color: '#FFF4E0',
+            opacity: 1,
+            glow: true,
+            shadowColor: '#FFB240',
+            shadowBlur: 9,
+          },
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    expect(filterStr).toContain('gblur=sigma=9');
+    expect(filterStr).toContain('color=c=black@0.0');
+    expect(filterStr).toContain('overlay=0:0:shortest=1');
+    // crisp core + blurred glow layer both draw the same text — drawtext appears twice.
+    expect(filterStr.split("text='Glowing'").length - 1).toBe(2);
+  });
+
+  it('bounds the glow canvas duration to the real video so the render does not run past it', () => {
+    // Regression test: the transparent glow canvas is a `color=...d=999` generator
+    // with no natural end. Without `shortest=1` on the overlay compositing it, ffmpeg
+    // runs the whole render to the generator's length instead of the real footage,
+    // duplicating the last frame indefinitely (reproduced and fixed during development).
+    const composition = {
+      ...baseComposition,
+      textTracks: [
+        {
+          id: 'txt-glow-bounded',
+          text: 'Glowing',
+          type: 'verse' as const,
+          startTime: 0,
+          endTime: 5,
+          position: 'center' as const,
+          style: {
+            fontFamily: 'Georgia, "Times New Roman", serif',
+            fontSize: 48,
+            color: '#FFF4E0',
+            opacity: 1,
+            glow: true,
+          },
+        },
+      ],
+    };
+    const { args } = buildRenderCommand(composition, '/src/video.mp4', '/out/video.mp4');
+    const filterStr = args[args.indexOf('-filter_complex') + 1];
+    expect(filterStr).toMatch(/\[t0_glowblur\]overlay=0:0:shortest=1/);
+  });
 });

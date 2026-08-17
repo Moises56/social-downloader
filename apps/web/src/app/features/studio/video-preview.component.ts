@@ -415,11 +415,26 @@ export class VideoPreviewComponent implements OnDestroy {
       'fontStyle': overlay.style.italic ? 'italic' : 'normal',
       'color': overlay.style.color,
       'opacity': String(overlay.style.opacity),
-      'textShadow': overlay.style.textShadow
-        ? `2px 2px 8px ${overlay.style.shadowColor ?? 'rgba(0,0,0,0.8)'}`
-        : 'none',
+      'textShadow': this.textShadowFor(overlay.style),
       'letterSpacing': `${overlay.style.letterSpacing ?? 0}rem`,
+      'whiteSpace': 'pre-line',
     };
+  }
+
+  /**
+   * Mirrors the render's glow technique (blurred halo behind a crisp core) using CSS
+   * text-shadow's native blur radius, so the preview stays WYSIWYG with the FFmpeg
+   * output instead of only ever showing a flat drop shadow.
+   */
+  private textShadowFor(style: TextOverlay['style'] | BrandOverlay['style']): string {
+    if (style.glow) {
+      const glowColor = style.shadowColor ?? '#FFB240';
+      const blur = style.shadowBlur && style.shadowBlur > 0 ? style.shadowBlur : 8;
+      return `0 0 ${blur}px ${glowColor}, 0 0 ${blur * 2}px ${glowColor}, 1px 1px 3px rgba(0,0,0,0.5)`;
+    }
+    return style.textShadow
+      ? `2px 2px 8px ${style.shadowColor ?? 'rgba(0,0,0,0.8)'}`
+      : 'none';
   }
 
   getBrandOverlayStyle(brand: BrandOverlay): Record<string, string> {
@@ -439,9 +454,7 @@ export class VideoPreviewComponent implements OnDestroy {
       'fontStyle': brand.style.italic ? 'italic' : 'normal',
       'color': brand.style.color,
       'opacity': String(brand.style.opacity),
-      'textShadow': brand.style.textShadow
-        ? `0 2px 8px ${brand.style.shadowColor ?? 'rgba(0,0,0,0.75)'}`
-        : 'none',
+      'textShadow': this.textShadowFor(brand.style),
       'letterSpacing': `${brand.style.letterSpacing ?? 0}rem`,
       'whiteSpace': 'nowrap',
     };

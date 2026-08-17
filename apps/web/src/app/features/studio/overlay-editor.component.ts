@@ -88,6 +88,14 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
           </div>
 
           <div class="field">
+            <label>Efecto</label>
+            <div class="effect-row">
+              <button class="effect-btn" [class.active]="!ov.style.glow" (click)="setGlow(false)">Ninguno</button>
+              <button class="effect-btn glow-preview" [class.active]="ov.style.glow" (click)="setGlow(true)">Glow ámbar</button>
+            </div>
+          </div>
+
+          <div class="field">
             <label>Ancho máximo</label>
             <select [ngModel]="maxWidthOption" (ngModelChange)="onMaxWidthChange($event)" class="select-input">
               <option value="70">Estrecho (70%)</option>
@@ -192,6 +200,18 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     }
     .color-swatch:hover { transform: scale(1.15); }
     .color-swatch.active { border-color: var(--color-text-primary); box-shadow: 0 0 0 2px var(--color-bg); }
+    .effect-row { display: flex; gap: 6px; }
+    .effect-btn {
+      flex: 1; padding: 7px 4px; border: 1px solid var(--color-border); border-radius: 6px;
+      background: var(--color-bg); color: var(--color-text-secondary);
+      cursor: pointer; font-size: 11px; font-weight: 500; transition: all var(--transition-fast);
+    }
+    .effect-btn:hover { border-color: var(--color-accent); }
+    .effect-btn.active { border-color: var(--color-accent); background: var(--color-accent-glow); color: var(--color-text-primary); }
+    .effect-btn.glow-preview.active {
+      color: #FFF4E0; text-shadow: 0 0 6px #FFB240, 0 0 12px #FFB240;
+      border-color: #FFB240; background: rgba(255, 178, 64, 0.12);
+    }
     .select-input {
       width: 100%; padding: 6px 8px;
       background: var(--color-bg); border: 1px solid var(--color-border);
@@ -252,6 +272,26 @@ export class OverlayEditorComponent {
 
   onMaxWidthChange(value: string): void {
     this.maxWidthOption.set(value);
+  }
+
+  setGlow(enabled: boolean): void {
+    const ov = this.overlay();
+    if (!ov) return;
+    // shadowColor doubles as "glow color" when glow is on, but most presets already
+    // carry a dark drop-shadow color (e.g. rgba(0,0,0,0.8)) for the non-glow look —
+    // that's not a fallback-worthy null, so `??` never kicks in. Turning "Glow ámbar"
+    // on always sets the amber halo the button promises; turning it off leaves
+    // shadowColor untouched so the regular drop shadow (if any) still works.
+    this.overlayUpdate.emit({
+      id: ov.id,
+      changes: {
+        style: {
+          ...ov.style,
+          glow: enabled,
+          ...(enabled ? { shadowColor: '#FFB240', shadowBlur: ov.style.shadowBlur ?? 8 } : {}),
+        },
+      },
+    });
   }
 
   private currentPosition(ov: TextOverlay): NormalizedPosition {
