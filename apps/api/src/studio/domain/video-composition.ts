@@ -12,6 +12,7 @@ import type {
   OverlayPosition as IOverlayPosition,
   OverlayAnimation as IOverlayAnimation,
   TextPreset as ITextPreset,
+  CompositionPreset as ICompositionPreset,
 } from '@social-downloader/contracts';
 
 export type VideoComposition = IVideoComposition;
@@ -27,6 +28,7 @@ export type TextStyleConfig = ITextStyleConfig;
 export type OverlayPosition = IOverlayPosition;
 export type OverlayAnimation = IOverlayAnimation;
 export type TextPreset = ITextPreset;
+export type CompositionPreset = ICompositionPreset;
 
 export const DEFAULT_OUTPUT: OutputPreset = {
   width: 1080,

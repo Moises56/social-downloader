@@ -5,7 +5,7 @@ import { StudioStore } from './state/studio.store';
 import { StudioApiService } from './services/studio-api.service';
 import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
-import type { BrandPreset, TextPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
@@ -52,6 +52,18 @@ import type { BrandPreset, TextPreset, TextOverlay, AudioTrack } from '@social-d
         </div>
 
         <div class="config-panel">
+          <section class="panel-section">
+            <h3>Flujo de composición</h3>
+            <div class="preset-grid">
+              @for (preset of compositionPresets(); track preset.id) {
+                <button class="preset-btn composition-preset" (click)="applyCompositionPreset(preset)">
+                  <span class="preset-name">{{ preset.name }}</span>
+                  <span class="preset-desc">{{ preset.description }}</span>
+                </button>
+              }
+            </div>
+          </section>
+
           <section class="panel-section">
             <h3>Presets de marca</h3>
             <div class="preset-grid">
@@ -156,6 +168,12 @@ import type { BrandPreset, TextPreset, TextOverlay, AudioTrack } from '@social-d
     }
     .preset-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
     .preset-chip.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+    .composition-preset {
+      display: flex; flex-direction: column; align-items: flex-start;
+      padding: 10px 14px; text-align: left; width: 100%;
+    }
+    .preset-name { font-size: 12px; font-weight: 600; }
+    .preset-desc { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
     .config-panel { display: flex; flex-direction: column; gap: 16px; }
     .panel-section { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--color-border-subtle); transition: border-color var(--transition-fast); }
     .panel-section:hover { border-color: var(--color-border); }
@@ -208,6 +226,7 @@ export class StudioPageComponent {
 
   readonly presets = signal<BrandPreset[]>([]);
   readonly textPresets = signal<TextPreset[]>([]);
+  readonly compositionPresets = signal<CompositionPreset[]>([]);
   readonly newText = signal('');
   readonly selectedTextPreset = signal<TextPreset | null>(null);
   readonly keepOriginalAudio = signal(true);
@@ -219,6 +238,9 @@ export class StudioPageComponent {
     });
     this.api.getTextPresets().subscribe({
       next: (res) => this.textPresets.set(res.presets),
+    });
+    this.api.getCompositionPresets().subscribe({
+      next: (res) => this.compositionPresets.set(res.presets),
     });
   }
 
@@ -324,5 +346,35 @@ export class StudioPageComponent {
 
   onSegmentUpdate(event: { id: string; start: number; end: number }): void {
     this.store.updateTextOverlay(event.id, { startTime: event.start, endTime: event.end });
+  }
+
+  applyCompositionPreset(preset: CompositionPreset): void {
+    const duration = this.store.totalDuration();
+    if (!duration) return;
+
+    const overlays: TextOverlay[] = preset.slots.map((slot) => {
+      const textPreset = this.textPresets().find((p) => p.id === slot.textPresetId);
+      return {
+        id: crypto.randomUUID(),
+        text: slot.text ?? slot.label,
+        type: (textPreset?.type ?? 'message') as TextOverlay['type'],
+        startTime: slot.relativeStart * duration,
+        endTime: slot.relativeEnd * duration,
+        position: slot.position,
+        style: textPreset?.defaultStyle ?? {
+          fontFamily: 'Georgia, "Times New Roman", serif',
+          fontSize: 48,
+          color: '#f6efe2',
+          opacity: 1,
+        },
+      };
+    });
+
+    this.store.setTextOverlays(overlays);
+
+    if (preset.brandPresetId) {
+      const brand = this.presets().find((p) => p.id === preset.brandPresetId);
+      if (brand) this.store.setPreset(brand);
+    }
   }
 }

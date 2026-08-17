@@ -118,6 +118,24 @@ export interface TextPreset {
   description: string;
 }
 
+export interface CompositionPresetSlot {
+  textPresetId: string;
+  label: string;
+  position: OverlayPosition;
+  relativeStart: number;
+  relativeEnd: number;
+  text?: string;
+}
+
+export interface CompositionPreset {
+  id: string;
+  name: string;
+  brandPresetId?: string;
+  brandMode?: 'ending' | 'persistent' | 'segmented';
+  slots: CompositionPresetSlot[];
+  description: string;
+}
+
 export interface TextStyleConfig {
   fontFamily: string;
   fontSize: number;
@@ -279,6 +297,10 @@ export interface BrandPresetsResponse {
 
 export interface TextPresetsResponse {
   presets: TextPreset[];
+}
+
+export interface CompositionPresetsResponse {
+  presets: CompositionPreset[];
 }
 
 // ─── Studio Error Codes ─────────────────────────────────────────

@@ -5,6 +5,7 @@ import { environment } from '../../../../environments/environment';
 import type {
   BrandPresetsResponse,
   TextPresetsResponse,
+  CompositionPresetsResponse,
   CreateCompositionResponse,
   StartRenderResponse,
   RenderStatusResponse,
@@ -23,6 +24,10 @@ export class StudioApiService {
 
   getTextPresets(): Observable<TextPresetsResponse> {
     return this.http.get<TextPresetsResponse>(`${this.baseUrl}/text-presets`);
+  }
+
+  getCompositionPresets(): Observable<CompositionPresetsResponse> {
+    return this.http.get<CompositionPresetsResponse>(`${this.baseUrl}/composition-presets`);
   }
 
   uploadSource(file: File): Observable<{ asset: { id: string; fileName: string; mimeType: string; size: number; duration?: number; width?: number; height?: number; createdAt: string } }> {

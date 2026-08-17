@@ -104,6 +104,10 @@ export class StudioStore {
     this.textOverlays.update((overlays) => [...overlays, overlay]);
   }
 
+  setTextOverlays(overlays: TextOverlay[]): void {
+    this.textOverlays.set(overlays);
+  }
+
   removeTextOverlay(id: string): void {
     this.textOverlays.update((overlays) => overlays.filter((o) => o.id !== id));
   }

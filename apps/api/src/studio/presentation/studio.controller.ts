@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   BrandPresetsResponse,
   TextPresetsResponse,
+  CompositionPresetsResponse,
   CreateCompositionRequest,
   CreateCompositionResponse,
   StartRenderRequest,
@@ -28,6 +29,7 @@ import type {
 } from '@social-downloader/contracts';
 import { BrandPresetService } from '../application/brand-preset.service';
 import { TextPresetService } from '../application/text-preset.service';
+import { CompositionPresetService } from '../application/composition-preset.service';
 import { TextOverlayService } from '../application/text-overlay.service';
 import { AudioMixingService } from '../application/audio-mixing.service';
 import { TempAssetStorage } from '../infrastructure/storage/temp-asset-storage.service';
@@ -41,6 +43,7 @@ export class StudioController {
   constructor(
     private readonly brandPresets: BrandPresetService,
     private readonly textPresets: TextPresetService,
+    private readonly compositionPresets: CompositionPresetService,
     private readonly textOverlays: TextOverlayService,
     private readonly audioMixing: AudioMixingService,
     private readonly storage: TempAssetStorage,
@@ -55,6 +58,11 @@ export class StudioController {
   @Get('text-presets')
   getTextPresets(): TextPresetsResponse {
     return { presets: this.textPresets.listPresets() };
+  }
+
+  @Get('composition-presets')
+  getCompositionPresets(): CompositionPresetsResponse {
+    return { presets: this.compositionPresets.listPresets() };
   }
 
   @Post('sources/upload')
