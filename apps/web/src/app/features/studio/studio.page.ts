@@ -1,16 +1,17 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StudioStore } from './state/studio.store';
 import { StudioApiService } from './services/studio-api.service';
 import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
+import { OverlayEditorComponent } from './overlay-editor.component';
 import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent],
+  imports: [CommonModule, FormsModule, VideoPreviewComponent, TimelineComponent, OverlayEditorComponent],
   template: `
     <div class="studio-container">
       <header class="studio-header">
@@ -100,11 +101,28 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
                 </button>
               }
             </div>
+            <div class="overlay-list">
+              @for (overlay of store.textOverlays(); track overlay.id) {
+                <div class="overlay-item" [class.active]="selectedOverlayId() === overlay.id" (click)="selectedOverlayId.set(overlay.id)">
+                  <span class="overlay-text">{{ overlay.text }}</span>
+                  <span class="overlay-time">{{ overlay.startTime | number:'1.1-1' }}s - {{ overlay.endTime | number:'1.1-1' }}s</span>
+                </div>
+              }
+            </div>
             <div class="add-text-form">
               <input [(ngModel)]="newText" [placeholder]="selectedTextPreset()?.description ?? 'Escribe tu texto...'" class="text-input">
               <button class="add-btn" (click)="addText()" [disabled]="!newText()">Agregar</button>
             </div>
           </section>
+
+          @if (selectedOverlay(); as ov) {
+            <app-overlay-editor
+              [overlay]="ov"
+              (overlayUpdate)="onOverlayUpdate($event)"
+              (duplicate)="onOverlayDuplicate($event)"
+              (remove)="onOverlayRemove($event)">
+            </app-overlay-editor>
+          }
 
           <section class="panel-section">
             <h3>Audio</h3>
@@ -174,6 +192,17 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     }
     .preset-name { font-size: 12px; font-weight: 600; }
     .preset-desc { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
+    .overlay-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .overlay-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; background: var(--color-bg); border-radius: 6px;
+      cursor: pointer; border: 1px solid transparent;
+      transition: all var(--transition-fast);
+    }
+    .overlay-item:hover { border-color: var(--color-border); }
+    .overlay-item.active { border-color: var(--color-accent); background: var(--color-accent-glow); }
+    .overlay-text { flex: 1; font-size: 12px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .overlay-time { font-size: 10px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
     .config-panel { display: flex; flex-direction: column; gap: 16px; }
     .panel-section { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--color-border-subtle); transition: border-color var(--transition-fast); }
     .panel-section:hover { border-color: var(--color-border); }
@@ -229,8 +258,15 @@ export class StudioPageComponent {
   readonly compositionPresets = signal<CompositionPreset[]>([]);
   readonly newText = signal('');
   readonly selectedTextPreset = signal<TextPreset | null>(null);
+  readonly selectedOverlayId = signal<string | null>(null);
   readonly keepOriginalAudio = signal(true);
   readonly originalVolume = signal(1.0);
+
+  readonly selectedOverlay = computed(() => {
+    const id = this.selectedOverlayId();
+    if (!id) return null;
+    return this.store.textOverlays().find((o) => o.id === id) ?? null;
+  });
 
   constructor() {
     this.api.getBrandPresets().subscribe({
@@ -371,10 +407,31 @@ export class StudioPageComponent {
     });
 
     this.store.setTextOverlays(overlays);
+    this.selectedOverlayId.set(null);
 
     if (preset.brandPresetId) {
       const brand = this.presets().find((p) => p.id === preset.brandPresetId);
       if (brand) this.store.setPreset(brand);
     }
+  }
+
+  onOverlayUpdate(event: { id: string; changes: Partial<TextOverlay> }): void {
+    this.store.updateTextOverlay(event.id, event.changes);
+  }
+
+  onOverlayDuplicate(id: string): void {
+    const ov = this.store.textOverlays().find((o) => o.id === id);
+    if (!ov) return;
+    const duplicate: TextOverlay = {
+      ...ov,
+      id: crypto.randomUUID(),
+      text: ov.text + ' (copia)',
+    };
+    this.store.addTextOverlay(duplicate);
+  }
+
+  onOverlayRemove(id: string): void {
+    this.store.removeTextOverlay(id);
+    if (this.selectedOverlayId() === id) this.selectedOverlayId.set(null);
   }
 }
