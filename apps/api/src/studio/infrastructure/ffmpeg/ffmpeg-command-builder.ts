@@ -54,7 +54,7 @@ export function buildRenderCommand(
     videoFilters.push(
       `color=c=${bgColor}:s=${output.width}x${output.height}:d=999[canvas]`,
       `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease[scaled]`,
-      `[canvas][scaled]overlay=(W-w)/2:(H-h)/2,fps=${output.fps},format=yuv420p[composed]`,
+      `[canvas][scaled]overlay=(W-w)/2:(H-h)/2:shortest=1,fps=${output.fps},format=yuv420p[composed]`,
     );
   } else {
     // crop (default)
