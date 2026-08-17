@@ -47,7 +47,15 @@ export class FfmpegVideoRenderer {
       throw new Error('Source asset not found');
     }
 
-    const { args } = buildRenderCommand(composition, sourcePath, outputPath);
+    const audioInputPaths: string[] = [];
+    for (const track of composition.audioTracks) {
+      const audioPath = await this.storage.resolveAssetPath(track.assetId);
+      if (audioPath) {
+        audioInputPaths.push(audioPath);
+      }
+    }
+
+    const { args } = buildRenderCommand(composition, sourcePath, outputPath, audioInputPaths);
 
     const result = await this.ffmpeg.runFfmpeg({
       args,

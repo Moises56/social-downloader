@@ -8,19 +8,20 @@ export function buildRenderCommand(
   composition: VideoComposition,
   sourcePath: string,
   outputPath: string,
+  audioInputPaths: string[] = [],
 ): FfmpegCommand {
   const args: string[] = [];
 
   args.push('-i', sourcePath);
 
-  for (const track of composition.audioTracks) {
-    args.push('-i', track.assetId);
+  for (const audioPath of audioInputPaths) {
+    args.push('-i', audioPath);
   }
 
-  const filters: string[] = [];
+  const videoFilters: string[] = [];
   const { output } = composition;
 
-  filters.push(
+  videoFilters.push(
     `scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease`,
     `pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:color=black`,
     `fps=${output.fps}`,
@@ -35,14 +36,26 @@ export function buildRenderCommand(
   );
 
   for (const text of textOverlays) {
-    filters.push(...buildTextOverlayFilters(text, output.width, output.height));
+    videoFilters.push(...buildTextOverlayFilters(text, output.width, output.height));
   }
 
   for (const brand of brandOverlays) {
-    filters.push(...buildBrandOverlayFilters(brand, output.width, output.height));
+    videoFilters.push(...buildBrandOverlayFilters(brand, output.width, output.height));
   }
 
-  args.push('-filter_complex', filters.join(','));
+  const hasAudioTracks = composition.audioTracks.length > 0;
+  const hasOriginalAudio = composition.keepOriginalAudio;
+
+  if (hasAudioTracks || hasOriginalAudio) {
+    const audioFilters = buildAudioFilters(composition);
+    const allFilters = [...videoFilters, ...audioFilters];
+    args.push('-filter_complex', allFilters.join(';'));
+    args.push('-map', '0:v');
+    args.push('-map', '[aout]');
+  } else {
+    args.push('-filter_complex', videoFilters.join(','));
+    args.push('-an');
+  }
 
   args.push(
     '-c:v', 'libx264',
@@ -52,16 +65,70 @@ export function buildRenderCommand(
     '-r', String(output.fps),
   );
 
-  if (composition.audioTracks.length > 0 || composition.keepOriginalAudio) {
+  if (hasAudioTracks || hasOriginalAudio) {
     args.push('-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2');
-  } else {
-    args.push('-an');
   }
 
   args.push('-movflags', '+faststart');
   args.push(outputPath);
 
   return { args };
+}
+
+function buildAudioFilters(
+  composition: VideoComposition,
+): string[] {
+  const filters: string[] = [];
+  const inputLabels: string[] = [];
+
+  if (composition.keepOriginalAudio) {
+    filters.push(
+      `[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,` +
+      `volume=${composition.originalAudioVolume}[aorig]`,
+    );
+    inputLabels.push('[aorig]');
+  }
+
+  composition.audioTracks.forEach((track, i) => {
+    const inputIdx = i + 1;
+    const label = `atrack${i}`;
+
+    const parts: string[] = [
+      `[${inputIdx}:a]`,
+      'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,',
+    ];
+
+    if (track.volume !== 1.0) {
+      parts.push(`volume=${track.volume},`);
+    }
+
+    if (track.startTime > 0) {
+      parts.push(`adelay=${Math.round(track.startTime * 1000)}|${Math.round(track.startTime * 1000)},`);
+    }
+
+    if (track.fadeIn && track.fadeIn > 0) {
+      parts.push(`afade=t=in:st=0:d=${track.fadeIn},`);
+    }
+
+    const lastComma = parts.length - 1;
+    if (parts[lastComma]?.endsWith(',')) {
+      parts[lastComma] = parts[lastComma].slice(0, -1);
+    }
+
+    parts.push(`[${label}]`);
+    filters.push(parts.join(''));
+    inputLabels.push(`[${label}]`);
+  });
+
+  if (inputLabels.length > 1) {
+    filters.push(
+      `${inputLabels.join('')}amix=inputs=${inputLabels.length}:duration=longest:normalize=0[aout]`,
+    );
+  } else if (inputLabels.length === 1) {
+    filters.push(`${inputLabels[0]}acopy[aout]`);
+  }
+
+  return filters;
 }
 
 function buildTextOverlayFilters(
