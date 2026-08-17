@@ -296,8 +296,9 @@ function computePosition(
     return { x: String(customPosition.x), y: String(customPosition.y) };
   }
 
-  const margin = 40;
-  const bottomSafe = height - 200;
+  const topSafe = Math.round(height * 0.10);
+  const bottomSafe = Math.round(height * 0.80);
+  const leftSafe = Math.round(width * 0.05);
 
   switch (position) {
     case 'bottom-center':
@@ -307,17 +308,17 @@ function computePosition(
       };
     case 'bottom-right':
       return {
-        x: `w-text_w-${margin}`,
+        x: `w-text_w-${leftSafe}`,
         y: String(bottomSafe - fontSize),
       };
     case 'bottom-left':
-      return { x: String(margin), y: String(bottomSafe - fontSize) };
+      return { x: String(leftSafe), y: String(bottomSafe - fontSize) };
     case 'top-center':
-      return { x: `(w-text_w)/2`, y: String(margin + fontSize) };
+      return { x: `(w-text_w)/2`, y: String(topSafe + fontSize) };
     case 'top-left':
-      return { x: String(margin), y: String(margin + fontSize) };
+      return { x: String(leftSafe), y: String(topSafe + fontSize) };
     case 'top-right':
-      return { x: `w-text_w-${margin}`, y: String(margin + fontSize) };
+      return { x: `w-text_w-${leftSafe}`, y: String(topSafe + fontSize) };
     case 'center':
       return {
         x: `(w-text_w)/2`,

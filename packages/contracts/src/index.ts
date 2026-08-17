@@ -81,6 +81,20 @@ export interface ApiError {
 
 // ─── Studio Domain ───────────────────────────────────────────────
 
+export interface SafeZones {
+  top: number;
+  bottom: number;
+  right: number;
+  left: number;
+}
+
+export const SOCIAL_SAFE_ZONES_9_16: SafeZones = {
+  top: 0.10,
+  bottom: 0.20,
+  right: 0.05,
+  left: 0.05,
+};
+
 export type OverlayPosition =
   | 'bottom-center'
   | 'bottom-right'
