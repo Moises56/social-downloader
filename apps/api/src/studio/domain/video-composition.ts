@@ -8,6 +8,7 @@ import type {
   RenderedVideo as IRenderedVideo,
   OutputPreset as IOutputPreset,
   StudioAsset as IStudioAsset,
+  TextStyleConfig as ITextStyleConfig,
 } from '@social-downloader/contracts';
 
 export type VideoComposition = IVideoComposition;
@@ -19,6 +20,7 @@ export type AudioTrack = IAudioTrack;
 export type RenderedVideo = IRenderedVideo;
 export type OutputPreset = IOutputPreset;
 export type StudioAsset = IStudioAsset;
+export type TextStyleConfig = ITextStyleConfig;
 
 export const DEFAULT_OUTPUT: OutputPreset = {
   width: 1080,

@@ -117,11 +117,22 @@ function buildBrandOverlayFilters(
     .replace(/'/g, "\\'")
     .replace(/:/g, '\\:');
 
+  const fadeInDuration = brand.animationIn === 'fade-in' ? 0.5 : 0;
+  const fadeOutDuration = brand.animationOut === 'fade-out' ? 0.5 : 0;
+
+  const alphaExpr = buildAlphaExpression(
+    brand.startTime,
+    brand.endTime,
+    brand.opacity,
+    fadeInDuration,
+    fadeOutDuration,
+  );
+
   const drawtext = [
     `drawtext=text='${escaped}'`,
     `fontfile=`,
     `fontsize=${brand.style.fontSize}`,
-    `fontcolor=${brand.style.color}@${brand.opacity}`,
+    `fontcolor=${brand.style.color}@${alphaExpr}`,
     `x=${pos.x}`,
     `y=${pos.y}`,
   ];
@@ -200,4 +211,38 @@ export function buildProbeCommand(filePath: string): FfmpegCommand {
       filePath,
     ],
   };
+}
+
+function buildAlphaExpression(
+  start: number,
+  end: number,
+  baseOpacity: number,
+  fadeInSec: number,
+  fadeOutSec: number,
+): string {
+  if (fadeInSec === 0 && fadeOutSec === 0) {
+    return String(baseOpacity);
+  }
+
+  const fadeInEnd = start + fadeInSec;
+  const fadeOutStart = end - fadeOutSec;
+  const parts: string[] = [];
+
+  if (fadeInSec > 0) {
+    parts.push(`if(between(t,${start},${fadeInEnd}),${baseOpacity}*((t-${start})/${fadeInSec}),0)`);
+  }
+
+  if (fadeOutSec > 0) {
+    if (fadeInSec > 0) {
+      parts.push(`+if(between(t,${fadeInEnd},${fadeOutStart}),${baseOpacity},0)`);
+      parts.push(`+if(between(t,${fadeOutStart},${end}),${baseOpacity}*(1-(t-${fadeOutStart})/${fadeOutSec}),0)`);
+    } else {
+      parts.push(`if(between(t,${start},${fadeOutStart}),${baseOpacity},0)`);
+      parts.push(`+if(between(t,${fadeOutStart},${end}),${baseOpacity}*(1-(t-${fadeOutStart})/${fadeOutSec}),0)`);
+    }
+  } else if (fadeInSec > 0) {
+    parts.push(`+if(between(t,${fadeInEnd},${end}),${baseOpacity},0)`);
+  }
+
+  return parts.join('');
 }
