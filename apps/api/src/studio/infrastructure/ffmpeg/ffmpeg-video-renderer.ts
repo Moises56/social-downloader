@@ -11,8 +11,15 @@ export interface RenderResult {
   filePath: string;
 }
 
+export interface RenderProgress {
+  phase: 'preparing' | 'rendering' | 'finalizing' | 'completed' | 'failed';
+  percent?: number;
+}
+
 @Injectable()
 export class FfmpegVideoRenderer {
+  private readonly abortControllers = new Map<string, AbortController>();
+
   constructor(
     private readonly ffmpeg: FfmpegService,
     private readonly storage: TempAssetStorage,
@@ -36,7 +43,7 @@ export class FfmpegVideoRenderer {
 
   async render(
     composition: VideoComposition,
-    signal?: AbortSignal,
+    onProgress?: (progress: RenderProgress) => void,
   ): Promise<RenderResult> {
     const renderId = randomUUID();
     const renderDir = await this.storage.createRenderDir(renderId);
@@ -55,17 +62,38 @@ export class FfmpegVideoRenderer {
       }
     }
 
+    onProgress?.({ phase: 'preparing' });
+
     const { args } = buildRenderCommand(composition, sourcePath, outputPath, audioInputPaths);
+
+    const abortController = new AbortController();
+    this.abortControllers.set(renderId, abortController);
+
+    onProgress?.({ phase: 'rendering', percent: 0 });
+
+    const duration = composition.source.duration ?? 30;
 
     const result = await this.ffmpeg.runFfmpeg({
       args,
       timeoutMs: 600_000,
-      signal,
+      signal: abortController.signal,
+      onStderr: (chunk) => {
+        const time = this.ffmpeg.parseProgressTime(chunk);
+        if (time !== null && duration > 0) {
+          const percent = Math.min(99, Math.round((time / duration) * 100));
+          onProgress?.({ phase: 'rendering', percent });
+        }
+      },
     });
 
+    this.abortControllers.delete(renderId);
+
     if (result.exitCode !== 0) {
+      onProgress?.({ phase: 'failed' });
       throw new Error(`FFmpeg exited with code ${result.exitCode}: ${result.stderr.slice(0, 500)}`);
     }
+
+    onProgress?.({ phase: 'finalizing', percent: 99 });
 
     const stats = await import('node:fs/promises').then((fs) =>
       fs.stat(outputPath).catch(() => null),
@@ -83,6 +111,16 @@ export class FfmpegVideoRenderer {
       completedAt: new Date().toISOString(),
     };
 
+    onProgress?.({ phase: 'completed', percent: 100 });
+
     return { render: rendered, filePath: outputPath };
+  }
+
+  cancelRender(renderId: string): void {
+    const controller = this.abortControllers.get(renderId);
+    if (controller) {
+      controller.abort();
+      this.abortControllers.delete(renderId);
+    }
   }
 }

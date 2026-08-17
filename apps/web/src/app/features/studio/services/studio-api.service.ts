@@ -7,8 +7,11 @@ import type {
   TextPresetsResponse,
   CompositionPresetsResponse,
   CreateCompositionResponse,
+  DuplicateCompositionResponse,
   StartRenderResponse,
   RenderStatusResponse,
+  SaveCompositionPresetResponse,
+  SavedCompositionPresetsResponse,
   TextOverlay,
   AudioTrack,
 } from '@social-downloader/contracts';
@@ -53,6 +56,28 @@ export class StudioApiService {
     );
   }
 
+  duplicateComposition(compositionId: string): Observable<DuplicateCompositionResponse> {
+    return this.http.post<DuplicateCompositionResponse>(
+      `${this.baseUrl}/compositions/duplicate`,
+      { compositionId },
+    );
+  }
+
+  saveCompositionPreset(name: string, compositionId: string): Observable<SaveCompositionPresetResponse> {
+    return this.http.post<SaveCompositionPresetResponse>(
+      `${this.baseUrl}/presets`,
+      { name, compositionId },
+    );
+  }
+
+  getSavedPresets(): Observable<SavedCompositionPresetsResponse> {
+    return this.http.get<SavedCompositionPresetsResponse>(`${this.baseUrl}/presets`);
+  }
+
+  deleteSavedPreset(presetId: string): Observable<unknown> {
+    return this.http.delete(`${this.baseUrl}/presets/${presetId}`);
+  }
+
   startRender(compositionId: string): Observable<StartRenderResponse> {
     return this.http.post<StartRenderResponse>(
       `${this.baseUrl}/renders`,
@@ -68,6 +93,14 @@ export class StudioApiService {
 
   getDownloadUrl(renderId: string): string {
     return `${this.baseUrl}/renders/${renderId}/download`;
+  }
+
+  getProgressUrl(renderId: string): string {
+    return `${this.baseUrl}/renders/${renderId}/progress`;
+  }
+
+  cancelRender(renderId: string): Observable<unknown> {
+    return this.http.post(`${this.baseUrl}/renders/${renderId}/cancel`, {});
   }
 
   uploadAudio(formData: FormData): Observable<{ asset: { id: string; fileName: string; size: number } }> {

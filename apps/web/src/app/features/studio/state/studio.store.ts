@@ -5,6 +5,7 @@ import type {
   TextOverlay,
   AudioTrack,
   RenderedVideo,
+  SavedCompositionPreset,
 } from '@social-downloader/contracts';
 
 export interface StudioAsset {
@@ -30,6 +31,8 @@ export class StudioStore {
   readonly renderProgress = signal<number>(0);
   readonly currentTime = signal<number>(0);
   readonly showSafeZones = signal<boolean>(false);
+  readonly savedPresets = signal<SavedCompositionPreset[]>([]);
+  readonly brandPresetId = signal<string | null>(null);
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
@@ -150,6 +153,24 @@ export class StudioStore {
 
   setRenderResult(result: RenderedVideo): void {
     this.renderResult.set(result);
+  }
+
+  setSavedPresets(presets: SavedCompositionPreset[]): void {
+    this.savedPresets.set(presets);
+  }
+
+  addSavedPreset(preset: SavedCompositionPreset): void {
+    this.savedPresets.update((presets) => [...presets, preset]);
+  }
+
+  removeSavedPreset(id: string): void {
+    this.savedPresets.update((presets) => presets.filter((p) => p.id !== id));
+  }
+
+  applySavedPreset(preset: SavedCompositionPreset): void {
+    this.brandPresetId.set(preset.brandPresetId ?? null);
+    this.textOverlays.set(preset.textTracks.map((t) => ({ ...t })));
+    this.audioTracks.set(preset.audioTracks.map((a) => ({ ...a })));
   }
 
   reset(): void {

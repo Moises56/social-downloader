@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   UploadedFile,
@@ -21,11 +22,17 @@ import type {
   CompositionPresetsResponse,
   CreateCompositionRequest,
   CreateCompositionResponse,
+  DuplicateCompositionRequest,
+  DuplicateCompositionResponse,
   StartRenderRequest,
   StartRenderResponse,
   RenderStatusResponse,
+  SaveCompositionPresetRequest,
+  SaveCompositionPresetResponse,
+  SavedCompositionPresetsResponse,
   VideoComposition,
   RenderedVideo,
+  SavedCompositionPreset,
 } from '@social-downloader/contracts';
 import { BrandPresetService } from '../application/brand-preset.service';
 import { TextPresetService } from '../application/text-preset.service';
@@ -37,6 +44,8 @@ import { FfmpegVideoRenderer } from '../infrastructure/ffmpeg/ffmpeg-video-rende
 import { DEFAULT_OUTPUT } from '../domain/video-composition';
 
 const renderJobs = new Map<string, { render: RenderedVideo; composition: VideoComposition }>();
+const compositionJobs = new Map<string, VideoComposition>();
+const savedPresets = new Map<string, SavedCompositionPreset>();
 
 @Controller('studio')
 export class StudioController {
@@ -152,7 +161,74 @@ export class StudioController {
       composition.overlays = [...composition.overlays, ...brandOverlays];
     }
 
+    compositionJobs.set(composition.id, composition);
+
     return { composition };
+  }
+
+  @Post('compositions/duplicate')
+  @HttpCode(HttpStatus.CREATED)
+  duplicateComposition(
+    @Body() body: DuplicateCompositionRequest,
+  ): DuplicateCompositionResponse {
+    const original = compositionJobs.get(body.compositionId);
+    if (!original) {
+      throw new Error('Composition not found');
+    }
+
+    const duplicate: VideoComposition = {
+      ...original,
+      id: randomUUID(),
+      overlays: original.overlays.map((o) => ({ ...o, id: randomUUID() })),
+      textTracks: original.textTracks.map((t) => ({ ...t, id: randomUUID() })),
+      audioTracks: original.audioTracks.map((a) => ({ ...a, id: randomUUID() })),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    compositionJobs.set(duplicate.id, duplicate);
+
+    return { composition: duplicate };
+  }
+
+  @Post('presets')
+  @HttpCode(HttpStatus.CREATED)
+  saveCompositionPreset(
+    @Body() body: SaveCompositionPresetRequest,
+  ): SaveCompositionPresetResponse {
+    const composition = compositionJobs.get(body.compositionId);
+    if (!composition) {
+      throw new Error('Composition not found');
+    }
+
+    const preset: SavedCompositionPreset = {
+      id: randomUUID(),
+      name: body.name,
+      brandPresetId: composition.brandPresetId,
+      textTracks: composition.textTracks.map((t) => ({ ...t })),
+      audioTracks: composition.audioTracks.map((a) => ({ ...a })),
+      keepOriginalAudio: composition.keepOriginalAudio,
+      originalAudioVolume: composition.originalAudioVolume,
+      createdAt: new Date().toISOString(),
+    };
+
+    savedPresets.set(preset.id, preset);
+
+    return { preset };
+  }
+
+  @Get('presets')
+  getSavedPresets(): SavedCompositionPresetsResponse {
+    return { presets: Array.from(savedPresets.values()) };
+  }
+
+  @Delete('presets/:id')
+  @HttpCode(HttpStatus.OK)
+  deleteSavedPreset(@Param('id') id: string): void {
+    if (!savedPresets.has(id)) {
+      throw new Error('Preset not found');
+    }
+    savedPresets.delete(id);
   }
 
   @Post('renders')
@@ -160,8 +236,8 @@ export class StudioController {
   async startRender(
     @Body() body: StartRenderRequest,
   ): Promise<StartRenderResponse> {
-    const jobEntry = renderJobs.get(body.compositionId);
-    if (!jobEntry) {
+    const composition = compositionJobs.get(body.compositionId);
+    if (!composition) {
       throw new Error('Composition not found');
     }
 
@@ -172,11 +248,70 @@ export class StudioController {
       createdAt: new Date().toISOString(),
     };
 
-    renderJobs.set(body.compositionId, { render, composition: jobEntry.composition });
+    renderJobs.set(body.compositionId, { render, composition });
 
     this.executeRender(body.compositionId).catch(() => {});
 
     return { render };
+  }
+
+  @Get('renders/:id/progress')
+  getRenderProgress(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    if (!entry) {
+      res.write(`data: ${JSON.stringify({ phase: 'failed', percent: 0 })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const sendProgress = (): void => {
+      const data = {
+        phase: entry.render.status === 'completed' ? 'completed'
+          : entry.render.status === 'failed' ? 'failed'
+          : entry.render.status === 'rendering' ? 'rendering'
+          : 'preparing',
+        percent: entry.render.progress ?? 0,
+      };
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      if (entry.render.status === 'completed' || entry.render.status === 'failed') {
+        res.end();
+      }
+    };
+
+    sendProgress();
+    const interval = setInterval(() => {
+      sendProgress();
+      if (entry.render.status === 'completed' || entry.render.status === 'failed') {
+        clearInterval(interval);
+      }
+    }, 500);
+
+    res.on('close', () => clearInterval(interval));
+  }
+
+  @Post('renders/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelRender(@Param('id') id: string): void {
+    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    if (!entry) {
+      throw new Error('Render not found');
+    }
+    this.renderer.cancelRender(entry.render.id);
+    entry.render = {
+      ...entry.render,
+      status: 'cancelled',
+      error: 'Cancelled by user',
+    };
   }
 
   @Get('renders/:id')
@@ -221,7 +356,14 @@ export class StudioController {
     entry.render.status = 'rendering';
 
     try {
-      const result = await this.renderer.render(entry.composition);
+      const result = await this.renderer.render(entry.composition, (progress) => {
+        entry.render.progress = progress.percent;
+        if (progress.phase === 'completed') {
+          entry.render.status = 'completed';
+        } else if (progress.phase === 'failed') {
+          entry.render.status = 'failed';
+        }
+      });
       entry.render = {
         ...entry.render,
         status: 'completed',
@@ -231,11 +373,19 @@ export class StudioController {
         completedAt: new Date().toISOString(),
       };
     } catch (error) {
-      entry.render = {
-        ...entry.render,
-        status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
+      if (error instanceof Error && error.message === 'CANCELLED') {
+        entry.render = {
+          ...entry.render,
+          status: 'cancelled',
+          error: 'Cancelled by user',
+        };
+      } else {
+        entry.render = {
+          ...entry.render,
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
     }
   }
 }

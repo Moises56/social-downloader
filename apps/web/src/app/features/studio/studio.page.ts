@@ -7,7 +7,7 @@ import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
-import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset } from '@social-downloader/contracts';
 
 @Component({
   selector: 'app-studio-page',
@@ -150,20 +150,62 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
               <input type="checkbox" [checked]="store.showSafeZones()" (change)="store.showSafeZones.set(!store.showSafeZones())">
               Mostrar zonas seguras
             </label>
+            <div class="export-actions">
+              <button class="action-btn-sm" (click)="duplicateComposition()" [disabled]="!store.composition()">
+                Duplicar
+              </button>
+              <button class="action-btn-sm" (click)="showSavePreset.set(true)" [disabled]="!store.composition()">
+                Guardar como preset
+              </button>
+            </div>
+            @if (showSavePreset()) {
+              <div class="save-preset-form">
+                <input [(ngModel)]="presetName" placeholder="Nombre del preset" class="text-input">
+                <div class="save-preset-actions">
+                  <button class="add-btn" (click)="saveCompositionPreset()" [disabled]="!presetName()">Guardar</button>
+                  <button class="cancel-save-btn" (click)="showSavePreset.set(false)">Cancelar</button>
+                </div>
+              </div>
+            }
             <button
               class="render-btn"
               [disabled]="!store.canRender()"
               (click)="startRender()">
               {{ store.renderState() === 'rendering' ? 'Renderizando...' : 'Renderizar video' }}
             </button>
+            @if (store.renderState() === 'rendering') {
+              <div class="progress-bar">
+                <div class="progress-fill" [style.width]="store.renderProgress() + '%'"></div>
+              </div>
+              <span class="progress-text">{{ store.renderProgress() }}%</span>
+              <button class="cancel-btn" (click)="cancelRender()">Cancelar render</button>
+            }
             <div class="render-status" *ngIf="store.renderResult() as result">
               <span *ngIf="result.status === 'completed'" class="status-success">Completado</span>
               <span *ngIf="result.status === 'failed'" class="status-error">{{ result.error }}</span>
-              <a *ngIf="result.status === 'completed' && result.id" class="download-btn" [href]="getDownloadUrl(result.id)" target="_blank">
-                Descargar
-              </a>
+              <span *ngIf="result.status === 'cancelled'" class="status-cancelled">Cancelado</span>
+              <div class="render-actions" *ngIf="result.status === 'completed' && result.id">
+                <a class="download-btn" [href]="getDownloadUrl(result.id)" target="_blank">Descargar</a>
+                <button class="action-btn" (click)="reRender()">Renderizar de nuevo</button>
+              </div>
             </div>
           </section>
+
+          @if (store.savedPresets().length > 0) {
+            <section class="panel-section">
+              <h3>Presets guardados</h3>
+              <div class="saved-presets-list">
+                @for (preset of store.savedPresets(); track preset.id) {
+                  <div class="saved-preset-item">
+                    <button class="saved-preset-btn" (click)="applySavedPreset(preset)">
+                      {{ preset.name }}
+                    </button>
+                    <button class="delete-preset-btn" (click)="deleteSavedPreset(preset.id)">&times;</button>
+                  </div>
+                }
+              </div>
+            </section>
+          }
         </div>
       </div>
     </div>
@@ -245,6 +287,60 @@ import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrac
     .status-error { color: var(--color-danger); font-size: 13px; }
     .download-btn { display: inline-block; margin-top: 10px; padding: 12px 28px; background: var(--color-accent); color: #fff; text-decoration: none; border-radius: var(--radius-sm); font-weight: 600; font-size: 14px; transition: all var(--transition-fast); }
     .download-btn:hover { background: var(--color-accent-hover); transform: translateY(-1px); }
+    .progress-bar { width: 100%; height: 6px; background: var(--color-bg); border-radius: 3px; margin-top: 12px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--color-accent), #2563eb); border-radius: 3px; transition: width 0.3s ease; }
+    .progress-text { font-size: 12px; color: var(--color-text-muted); text-align: center; display: block; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .cancel-btn {
+      width: 100%; margin-top: 8px; padding: 8px;
+      background: none; border: 1px solid var(--color-danger);
+      border-radius: var(--radius-sm); color: var(--color-danger);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .cancel-btn:hover { background: var(--color-danger-bg); }
+    .status-cancelled { color: var(--color-text-muted); font-weight: 500; font-size: 13px; }
+    .render-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .render-actions .download-btn { flex: 1; text-align: center; margin-top: 0; }
+    .action-btn {
+      padding: 10px 16px; background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); color: var(--color-text-secondary);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .action-btn:hover { border-color: var(--color-text-muted); }
+    .export-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+    .action-btn-sm {
+      flex: 1; padding: 8px 12px; background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); color: var(--color-text-secondary);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .action-btn-sm:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text-primary); }
+    .action-btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+    .save-preset-form { margin-bottom: 14px; }
+    .save-preset-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .cancel-save-btn {
+      padding: 10px 18px; background: none; border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); color: var(--color-text-secondary);
+      font-size: 13px; cursor: pointer; transition: all var(--transition-fast);
+    }
+    .cancel-save-btn:hover { border-color: var(--color-text-muted); }
+    .saved-presets-list { display: flex; flex-direction: column; gap: 6px; }
+    .saved-preset-item { display: flex; gap: 6px; align-items: center; }
+    .saved-preset-btn {
+      flex: 1; padding: 8px 12px; background: var(--color-bg); border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); color: var(--color-text-secondary);
+      font-size: 12px; font-weight: 500; cursor: pointer; text-align: left;
+      transition: all var(--transition-fast);
+    }
+    .saved-preset-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+    .delete-preset-btn {
+      padding: 6px 10px; background: none; border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm); color: var(--color-text-muted);
+      font-size: 14px; cursor: pointer; line-height: 1;
+      transition: all var(--transition-fast);
+    }
+    .delete-preset-btn:hover { border-color: var(--color-danger); color: var(--color-danger); }
     @media (max-width: 768px) {
       .studio-layout { grid-template-columns: 1fr; }
       .preview-panel { min-height: 320px; }
@@ -264,6 +360,8 @@ export class StudioPageComponent {
   readonly keepOriginalAudio = signal(true);
   readonly originalVolume = signal(1.0);
   readonly autoDuck = signal(false);
+  readonly showSavePreset = signal(false);
+  readonly presetName = signal('');
 
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
@@ -280,6 +378,9 @@ export class StudioPageComponent {
     });
     this.api.getCompositionPresets().subscribe({
       next: (res) => this.compositionPresets.set(res.presets),
+    });
+    this.api.getSavedPresets().subscribe({
+      next: (res) => this.store.setSavedPresets(res.presets),
     });
   }
 
@@ -338,6 +439,7 @@ export class StudioPageComponent {
     if (!asset) return;
 
     this.store.setRenderState('rendering');
+    this.store.renderProgress.set(0);
 
     this.api.createComposition({
       sourceAssetId: asset.id,
@@ -352,13 +454,56 @@ export class StudioPageComponent {
         this.api.startRender(res.composition.id).subscribe({
           next: (renderRes) => {
             this.store.setRenderResult(renderRes.render);
-            this.pollRender(renderRes.render.id);
+            this.subscribeToProgress(renderRes.render.id);
           },
           error: () => this.store.setRenderState('error'),
         });
       },
       error: () => this.store.setRenderState('error'),
     });
+  }
+
+  cancelRender(): void {
+    const result = this.store.renderResult();
+    if (!result?.id) return;
+    this.api.cancelRender(result.id).subscribe({
+      next: () => {
+        this.store.setRenderResult({ ...result, status: 'cancelled' });
+        this.store.setRenderState('idle');
+      },
+    });
+  }
+
+  reRender(): void {
+    this.store.setRenderState('idle');
+    this.store.renderResult.set(null);
+    this.startRender();
+  }
+
+  private subscribeToProgress(renderId: string): void {
+    const eventSource = new EventSource(this.api.getProgressUrl(renderId));
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.percent !== undefined) {
+          this.store.renderProgress.set(data.percent);
+        }
+        if (data.phase === 'completed') {
+          this.store.setRenderState('success');
+          eventSource.close();
+          this.pollRender(renderId);
+        } else if (data.phase === 'failed') {
+          this.store.setRenderState('error');
+          eventSource.close();
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    eventSource.onerror = () => {
+      eventSource.close();
+      this.pollRender(renderId);
+    };
   }
 
   private pollRender(renderId: string): void {
@@ -472,5 +617,40 @@ export class StudioPageComponent {
 
   onUpdateAudioTrack(event: { id: string; changes: Partial<AudioTrack> }): void {
     this.store.updateAudioTrack(event.id, event.changes);
+  }
+
+  duplicateComposition(): void {
+    const composition = this.store.composition();
+    if (!composition) return;
+
+    this.api.duplicateComposition(composition.id).subscribe({
+      next: (res) => {
+        this.store.setComposition(res.composition);
+      },
+    });
+  }
+
+  saveCompositionPreset(): void {
+    const composition = this.store.composition();
+    const name = this.presetName();
+    if (!composition || !name) return;
+
+    this.api.saveCompositionPreset(name, composition.id).subscribe({
+      next: (res) => {
+        this.store.addSavedPreset(res.preset);
+        this.showSavePreset.set(false);
+        this.presetName.set('');
+      },
+    });
+  }
+
+  applySavedPreset(preset: SavedCompositionPreset): void {
+    this.store.applySavedPreset(preset);
+  }
+
+  deleteSavedPreset(presetId: string): void {
+    this.api.deleteSavedPreset(presetId).subscribe({
+      next: () => this.store.removeSavedPreset(presetId),
+    });
   }
 }

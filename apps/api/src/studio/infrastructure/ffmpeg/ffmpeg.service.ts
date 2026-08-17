@@ -7,6 +7,7 @@ export interface RunMediaToolOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   maxOutputBytes?: number;
+  onStderr?: (chunk: string) => void;
 }
 
 export interface RunMediaToolResult {
@@ -78,7 +79,7 @@ export class FfmpegService {
 
   private run(
     binary: string,
-    { args, timeoutMs = 120_000, signal, maxOutputBytes = 50 * 1024 * 1024 }: RunMediaToolOptions,
+    { args, timeoutMs = 120_000, signal, maxOutputBytes = 50 * 1024 * 1024, onStderr }: RunMediaToolOptions,
   ): Promise<RunMediaToolResult> {
     return new Promise((resolve, reject) => {
       let stdout = '';
@@ -124,7 +125,9 @@ export class FfmpegService {
       });
 
       child.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
+        const str = chunk.toString();
+        stderr += str;
+        onStderr?.(str);
       });
 
       child.once('error', (error) => {

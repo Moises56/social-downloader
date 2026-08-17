@@ -279,6 +279,14 @@ export interface CreateCompositionResponse {
   composition: VideoComposition;
 }
 
+export interface DuplicateCompositionRequest {
+  compositionId: string;
+}
+
+export interface DuplicateCompositionResponse {
+  composition: VideoComposition;
+}
+
 export interface StartRenderRequest {
   compositionId: string;
 }
@@ -301,6 +309,34 @@ export interface TextPresetsResponse {
 
 export interface CompositionPresetsResponse {
   presets: CompositionPreset[];
+}
+
+export interface SavedCompositionPreset {
+  id: string;
+  name: string;
+  brandPresetId?: string;
+  textTracks: TextOverlay[];
+  audioTracks: AudioTrack[];
+  keepOriginalAudio: boolean;
+  originalAudioVolume: number;
+  createdAt: string;
+}
+
+export interface SaveCompositionPresetRequest {
+  name: string;
+  compositionId: string;
+}
+
+export interface SaveCompositionPresetResponse {
+  preset: SavedCompositionPreset;
+}
+
+export interface SavedCompositionPresetsResponse {
+  presets: SavedCompositionPreset[];
+}
+
+export interface DeleteCompositionPresetRequest {
+  presetId: string;
 }
 
 // ─── Studio Error Codes ─────────────────────────────────────────
