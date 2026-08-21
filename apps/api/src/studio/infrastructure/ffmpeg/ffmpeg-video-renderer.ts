@@ -67,16 +67,42 @@ export class FfmpegVideoRenderer {
       }
     }
 
+    // El orden importa: los índices de entrada del filtergraph son
+    // 0 = fuente, luego audio, luego imágenes. Una imagen que no resuelva se descarta
+    // junto a su capa, para que los índices no se desalineen con las cadenas generadas.
+    const imageInputPaths: string[] = [];
+    const resolvedImages: typeof composition.images = [];
+    for (const image of composition.images ?? []) {
+      const imagePath = await this.storage.resolveAssetPath(image.assetId);
+      if (imagePath) {
+        imageInputPaths.push(imagePath);
+        resolvedImages.push(image);
+      }
+    }
+    const renderable = { ...composition, images: resolvedImages };
+
     onProgress?.({ phase: 'preparing' });
 
-    const { args } = buildRenderCommand(composition, sourcePath, outputPath, audioInputPaths);
+    const { args } = buildRenderCommand(
+      renderable,
+      sourcePath,
+      outputPath,
+      audioInputPaths,
+      imageInputPaths,
+    );
 
     const abortController = new AbortController();
     this.abortControllers.set(renderId, abortController);
 
     onProgress?.({ phase: 'rendering', percent: 0 });
 
-    const duration = composition.source.duration ?? 30;
+    // Con recorte, el render dura lo recortado, no el material entero: sin esto el
+    // porcentaje de progreso se queda corto y nunca llega al final.
+    const trim = composition.source.trim;
+    const duration =
+      trim && trim.end > trim.start
+        ? trim.end - trim.start
+        : composition.source.duration ?? 30;
 
     let result;
     try {
@@ -115,7 +141,7 @@ export class FfmpegVideoRenderer {
       filePath: outputPath,
       fileName: 'output.mp4',
       fileSize: stats?.size ?? 0,
-      duration: composition.source.duration,
+      duration,
       createdAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
     };

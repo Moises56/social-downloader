@@ -471,4 +471,238 @@ describe('FFmpeg Render Integration', { timeout: 30000 }, () => {
     const aoutMaps = args.filter((a) => a === '[aout]');
     expect(aoutMaps.length).toBe(1);
   });
+  // ─── Recorte, máscaras y capas de imagen ──────────────────────────────────
+  //
+  // Estos casos no se conforman con "el render no falló": leen los píxeles del resultado.
+  // Una máscara que se genera en el filtergraph pero no tapa nada pasaría cualquier
+  // aserción basada solo en duración o resolución.
+
+  const PATTERN_PATH = '/tmp/test-pattern.mp4';
+  const LOGO_PATH = '/tmp/test-logo.png';
+
+  /**
+   * Extrae una región de un frame como escala de grises cruda y devuelve sus estadísticas.
+   * Se escribe a fichero en vez de leer stdout porque el runner captura stdout como string
+   * y eso corrompería los bytes binarios.
+   */
+  async function sampleRegion(
+    videoPath: string,
+    region: { x: number; y: number; w: number; h: number },
+    atSecond: number,
+    pixFmt: 'gray' | 'rgb24' = 'gray',
+  ): Promise<{ min: number; max: number; mean: number; spread: number; sharpness: number; bytes: Buffer }> {
+    const ffmpegPath = await ffmpeg.resolveFfmpeg();
+    const rawPath = `${FIXTURES_DIR}/region-${randomUUID()}.raw`;
+    const { execFileSync } = await import('node:child_process');
+    execFileSync(
+      ffmpegPath,
+      [
+        '-y', '-ss', String(atSecond), '-i', videoPath,
+        '-vf', `crop=${region.w}:${region.h}:${region.x}:${region.y}`,
+        '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', pixFmt, rawPath,
+      ],
+      { timeout: 30_000, stdio: 'pipe' },
+    );
+    const fs = await import('node:fs/promises');
+    const bytes = await fs.readFile(rawPath);
+    await fs.unlink(rawPath).catch(() => undefined);
+
+    let min = 255, max = 0, total = 0;
+    for (const b of bytes) {
+      if (b < min) min = b;
+      if (b > max) max = b;
+      total += b;
+    }
+
+    /**
+     * Detalle local: diferencia media entre píxeles horizontalmente contiguos.
+     *
+     * `max - min` NO sirve para detectar desenfoque: un patrón con negros y blancos puros
+     * conserva sus extremos aunque se difumine, así que el rango se queda en ~255. Lo que
+     * el desenfoque destruye es la variación de vecino a vecino, y eso es lo que se mide.
+     * Solo tiene sentido en escala de grises (1 byte por píxel).
+     */
+    let sharpness = 0;
+    if (pixFmt === 'gray') {
+      let diffTotal = 0, pairs = 0;
+      for (let row = 0; row < region.h; row++) {
+        const base = row * region.w;
+        for (let col = 1; col < region.w; col++) {
+          diffTotal += Math.abs(bytes[base + col] - bytes[base + col - 1]);
+          pairs++;
+        }
+      }
+      sharpness = pairs > 0 ? diffTotal / pairs : 0;
+    }
+
+    return { min, max, mean: total / bytes.length, spread: max - min, sharpness, bytes };
+  }
+
+  let patternAssetId: string;
+  let logoAssetId: string;
+
+  beforeAll(async () => {
+    const ffmpegPath = await ffmpeg.resolveFfmpeg();
+    const { execFileSync } = await import('node:child_process');
+    const fs = await import('node:fs/promises');
+
+    /**
+     * Fuente con detalle en TODO el fotograma: un tablero de 4px.
+     *
+     * Ni `testsrc` ni `testsrc2` sirven: medidos en la región de prueba dan un detalle
+     * local de 0.81 (zona plana del patrón), así que un desenfoque no tendría nada que
+     * destruir y el test pasaría sin comprobar nada. El tablero da ~63.
+     *
+     * Se genera un único PNG y se repite en bucle, que es mucho más rápido que evaluar
+     * `geq` en cada fotograma.
+     */
+    const patternFrame = `${FIXTURES_DIR}/pattern-frame.png`;
+    execFileSync(ffmpegPath, [
+      '-y', '-f', 'lavfi', '-i', 'nullsrc=s=1080x1920',
+      '-vf', "geq='if(eq(mod(floor(X/4)+floor(Y/4),2),0),235,16)':128:128",
+      '-frames:v', '1', patternFrame,
+    ], { timeout: 60_000, stdio: 'pipe' });
+    execFileSync(ffmpegPath, [
+      '-y', '-loop', '1', '-i', patternFrame, '-t', '10', '-r', '30',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      PATTERN_PATH,
+    ], { timeout: 60_000, stdio: 'pipe' });
+
+    execFileSync(ffmpegPath, [
+      '-y', '-f', 'lavfi', '-i', 'color=c=red:s=200x200', '-frames:v', '1', LOGO_PATH,
+    ], { timeout: 30_000, stdio: 'pipe' });
+
+    patternAssetId = (await storage.createAsset('pattern.mp4', await fs.readFile(PATTERN_PATH))).id;
+    logoAssetId = (await storage.createAsset('logo.png', await fs.readFile(LOGO_PATH))).id;
+  });
+
+  afterAll(async () => {
+    try { await unlink(PATTERN_PATH); } catch { /* best-effort */ }
+    try { await unlink(LOGO_PATH); } catch { /* best-effort */ }
+    try { await storage.deleteAsset(patternAssetId); } catch { /* best-effort */ }
+    try { await storage.deleteAsset(logoAssetId); } catch { /* best-effort */ }
+  });
+
+  it('trim: el render dura lo recortado, no el material entero', async () => {
+    const comp = makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10, trim: { start: 3, end: 8 } },
+    });
+    const result = await renderer.render(comp);
+    const probe = await probeOutput(result.filePath, ffmpeg);
+
+    expect(probe.duration).toBeGreaterThan(4.5);
+    expect(probe.duration).toBeLessThan(5.5);
+  });
+
+  it('máscara solid: la región queda rellena de un color plano', async () => {
+    const region = { x: 200, y: 400, w: 300, h: 200 };
+    const comp = makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+      masks: [{
+        id: 'm1',
+        mode: 'solid',
+        color: '#000000',
+        intensity: 0,
+        rect: { x: region.x / 1080, y: region.y / 1920, width: region.w / 1080, height: region.h / 1920 },
+        startTime: 0,
+        endTime: 10,
+      }],
+    });
+    const result = await renderer.render(comp);
+
+    // Se muestrea con margen hacia dentro para no medir el borde de redondeo.
+    const inside = await sampleRegion(result.filePath, { x: region.x + 20, y: region.y + 20, w: region.w - 40, h: region.h - 40 }, 2);
+    expect(inside.spread).toBeLessThan(12);
+    expect(inside.mean).toBeLessThan(40);
+  });
+
+  it('máscara blur: la región tapada pierde detalle frente a la misma sin tapar', async () => {
+    const region = { x: 300, y: 700, w: 400, h: 300 };
+    const rect = { x: region.x / 1080, y: region.y / 1920, width: region.w / 1080, height: region.h / 1920 };
+
+    const plain = await renderer.render(makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+    }));
+    const masked = await renderer.render(makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+      masks: [{ id: 'm1', mode: 'blur', intensity: 20, rect, startTime: 0, endTime: 10 }],
+    }));
+
+    const sample = { x: region.x + 30, y: region.y + 30, w: region.w - 60, h: region.h - 60 };
+    const before = await sampleRegion(plain.filePath, sample, 2);
+    const after = await sampleRegion(masked.filePath, sample, 2);
+
+    // Desenfocar destruye el detalle local. Se exige una caída grande para que el test
+    // no pueda pasar por ruido de codificación.
+    expect(before.sharpness).toBeGreaterThan(5);
+    expect(after.sharpness).toBeLessThan(before.sharpness * 0.5);
+  });
+
+  it('máscara temporizada: solo tapa dentro de su ventana', async () => {
+    const region = { x: 200, y: 400, w: 300, h: 200 };
+    const comp = makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+      masks: [{
+        id: 'm1',
+        mode: 'solid',
+        color: '#000000',
+        intensity: 0,
+        rect: { x: region.x / 1080, y: region.y / 1920, width: region.w / 1080, height: region.h / 1920 },
+        startTime: 5,
+        endTime: 10,
+      }],
+    });
+    const result = await renderer.render(comp);
+    const sample = { x: region.x + 20, y: region.y + 20, w: region.w - 40, h: region.h - 40 };
+
+    const outsideWindow = await sampleRegion(result.filePath, sample, 2);
+    const insideWindow = await sampleRegion(result.filePath, sample, 7);
+
+    expect(insideWindow.spread).toBeLessThan(12);
+    expect(outsideWindow.spread).toBeGreaterThan(insideWindow.spread);
+  });
+
+  it('capa de imagen: el logo aparece donde se coloca', async () => {
+    const comp = makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+      images: [{
+        id: 'img1',
+        assetId: logoAssetId,
+        fileName: 'logo.png',
+        position: { x: 0.5, y: 0.5 },
+        scale: 200 / 1080,
+        opacity: 1,
+        startTime: 0,
+        endTime: 10,
+      }],
+    });
+    const result = await renderer.render(comp);
+
+    // Centro del lienzo, dentro del logo de 200px.
+    const sample = await sampleRegion(result.filePath, { x: 500, y: 920, w: 80, h: 80 }, 2, 'rgb24');
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i + 2 < sample.bytes.length; i += 3) {
+      r += sample.bytes[i]; g += sample.bytes[i + 1]; b += sample.bytes[i + 2];
+    }
+    expect(r).toBeGreaterThan(g * 3);
+    expect(r).toBeGreaterThan(b * 3);
+  });
+
+  it('orden de composición: las máscaras se aplican antes que los textos', async () => {
+    const comp = makeComposition({
+      source: { assetId: patternAssetId, fileName: 'pattern.mp4', duration: 10 },
+      masks: [{
+        id: 'm1', mode: 'blur', intensity: 10,
+        rect: { x: 0.1, y: 0.1, width: 0.3, height: 0.2 },
+        startTime: 0, endTime: 10,
+      }],
+      textTracks: [BASE_TEXT],
+    });
+    const { buildRenderCommand } = await import('../infrastructure/ffmpeg/ffmpeg-command-builder');
+    const { args } = buildRenderCommand(comp, PATTERN_PATH, '/tmp/unused.mp4');
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+
+    // Si el texto se dibujara primero, la máscara lo emborronaría.
+    expect(filterComplex.indexOf('boxblur')).toBeLessThan(filterComplex.indexOf('drawtext'));
+  });
 });

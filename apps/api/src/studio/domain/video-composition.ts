@@ -14,6 +14,9 @@ import type {
   TextPreset as ITextPreset,
   CompositionPreset as ICompositionPreset,
   VideoFitConfig as IVideoFitConfig,
+  SourceTrim as ISourceTrim,
+  MaskLayer as IMaskLayer,
+  ImageLayer as IImageLayer,
 } from '@social-downloader/contracts';
 
 export type VideoComposition = IVideoComposition;
@@ -31,6 +34,9 @@ export type OverlayAnimation = IOverlayAnimation;
 export type TextPreset = ITextPreset;
 export type CompositionPreset = ICompositionPreset;
 export type VideoFitConfig = IVideoFitConfig;
+export type SourceTrim = ISourceTrim;
+export type MaskLayer = IMaskLayer;
+export type ImageLayer = IImageLayer;
 
 export const DEFAULT_OUTPUT: OutputPreset = {
   width: 1080,

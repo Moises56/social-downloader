@@ -59,8 +59,8 @@ import { DEFAULT_OUTPUT } from '../domain/video-composition';
  */
 const MAX_UPLOAD_BYTES = Number(process.env.STUDIO_MAX_UPLOAD_MB ?? 512) * 1024 * 1024;
 
-/** Studio compone vídeo y audio; las imágenes llegarán con las capas de imagen. */
-const ACCEPTED_UPLOAD_TYPES = /^(video|audio)\//;
+/** Fuentes de vídeo, pistas de audio y logos/stickers para las capas de imagen. */
+const ACCEPTED_UPLOAD_TYPES = /^(video|audio|image)\//;
 
 const renderJobs = new Map<string, { render: RenderedVideo; composition: VideoComposition }>();
 const compositionJobs = new Map<string, VideoComposition>();
@@ -181,11 +181,30 @@ export class StudioController {
       // default
     }
 
+    // El recorte se valida contra el material real: unos tiempos invertidos o fuera de
+    // rango producirían un `-t` negativo y un render vacío.
+    let trim = body.sourceTrim;
+    if (trim) {
+      const start = Math.max(0, trim.start);
+      const end = duration > 0 ? Math.min(duration, trim.end) : trim.end;
+      if (!(end > start)) {
+        throw new ApiError(
+          'STUDIO_INVALID_COMPOSITION',
+          'El recorte no es válido: el final debe ser posterior al inicio.',
+        );
+      }
+      trim = { start, end };
+    }
+
     const source = {
       assetId: body.sourceAssetId,
       fileName: 'source',
       duration,
+      trim,
     };
+
+    // Todo lo temporal (overlays, marca, audio) es relativo al material YA recortado.
+    const effectiveDuration = trim ? trim.end - trim.start : duration;
 
     let output = { ...DEFAULT_OUTPUT };
     if (body.exportPresetId) {
@@ -216,6 +235,8 @@ export class StudioController {
       overlays: body.overlays ?? [],
       textTracks: body.textTracks ?? [],
       audioTracks: body.audioTracks ?? [],
+      masks: body.masks ?? [],
+      images: body.images ?? [],
       keepOriginalAudio: body.keepOriginalAudio ?? true,
       originalAudioVolume: body.originalAudioVolume ?? 1.0,
       createdAt: new Date().toISOString(),
@@ -225,7 +246,7 @@ export class StudioController {
     if (composition.brandPresetId) {
       const brandOverlays = this.brandPresets.createBrandOverlay(
         composition.brandPresetId,
-        duration,
+        effectiveDuration,
         undefined,
         undefined,
         body.brandCustomPosition,
@@ -252,6 +273,8 @@ export class StudioController {
       ...original,
       id: randomUUID(),
       overlays: original.overlays.map((o) => ({ ...o, id: randomUUID() })),
+      masks: (original.masks ?? []).map((m) => ({ ...m, id: randomUUID() })),
+      images: (original.images ?? []).map((i) => ({ ...i, id: randomUUID() })),
       textTracks: original.textTracks.map((t) => ({ ...t, id: randomUUID() })),
       audioTracks: original.audioTracks.map((a) => ({ ...a, id: randomUUID() })),
       createdAt: new Date().toISOString(),

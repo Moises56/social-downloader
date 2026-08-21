@@ -211,6 +211,17 @@ export interface VideoFitConfig {
   backgroundGradient?: string;
 }
 
+/**
+ * Recorte temporal dentro del material de origen, en segundos.
+ * `end` es exclusivo; la duración resultante es `end - start`.
+ * Los tiempos de overlays, máscaras y audio son relativos al material YA recortado,
+ * es decir, empiezan en 0 en `trim.start`.
+ */
+export interface SourceTrim {
+  start: number;
+  end: number;
+}
+
 export interface VideoSource {
   assetId: string;
   fileName: string;
@@ -218,6 +229,8 @@ export interface VideoSource {
   width?: number;
   height?: number;
   mimeType?: string;
+  /** Sin recorte se usa el material completo. */
+  trim?: SourceTrim;
 }
 
 export interface TextOverlay {
@@ -247,6 +260,41 @@ export interface BrandOverlay {
   opacity: number;
 }
 
+/** Cómo se oculta la región tapada. */
+export type MaskMode = 'blur' | 'pixelate' | 'solid';
+
+/**
+ * Región rectangular que oculta parte del vídeo: logos de otras plataformas, marcas de
+ * agua ajenas, nombres de usuario. Se aplica ANTES de textos e imágenes, para no tapar
+ * lo que tú añades encima.
+ */
+export interface MaskLayer {
+  id: string;
+  mode: MaskMode;
+  /** Normalizado 0..1 sobre el lienzo de salida; `x`/`y` son la esquina superior izquierda. */
+  rect: { x: number; y: number; width: number; height: number };
+  /** Fuerza del desenfoque o tamaño del pixelado. Ignorado en modo `solid`. */
+  intensity: number;
+  /** Solo en modo `solid`. */
+  color?: string;
+  startTime: number;
+  endTime: number;
+}
+
+/** Logo, sticker o cualquier PNG/JPG superpuesto. */
+export interface ImageLayer {
+  id: string;
+  assetId: string;
+  fileName: string;
+  /** Centro de la imagen, normalizado 0..1 sobre el lienzo. */
+  position: { x: number; y: number };
+  /** Ancho como fracción del lienzo (0..1). El alto se deriva del aspecto original. */
+  scale: number;
+  opacity: number;
+  startTime: number;
+  endTime: number;
+}
+
 export interface AudioTrack {
   id: string;
   assetId: string;
@@ -268,6 +316,10 @@ export interface VideoComposition {
   overlays: BrandOverlay[];
   textTracks: TextOverlay[];
   audioTracks: AudioTrack[];
+  /** Regiones tapadas. Opcional por compatibilidad con composiciones anteriores. */
+  masks?: MaskLayer[];
+  /** Logos y stickers. Opcional por compatibilidad con composiciones anteriores. */
+  images?: ImageLayer[];
   keepOriginalAudio: boolean;
   originalAudioVolume: number;
   createdAt: string;
@@ -311,6 +363,9 @@ export interface CreateCompositionRequest {
   overlays?: BrandOverlay[];
   textTracks?: TextOverlay[];
   audioTracks?: AudioTrack[];
+  masks?: MaskLayer[];
+  images?: ImageLayer[];
+  sourceTrim?: SourceTrim;
   keepOriginalAudio?: boolean;
   originalAudioVolume?: number;
   brandCustomPosition?: { x: number; y: number };

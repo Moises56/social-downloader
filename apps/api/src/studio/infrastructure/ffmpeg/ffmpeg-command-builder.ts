@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import type { VideoComposition, TextOverlay, BrandOverlay, TextStyleConfig } from '../../domain/video-composition';
+import type {
+  VideoComposition,
+  TextOverlay,
+  BrandOverlay,
+  TextStyleConfig,
+  MaskLayer,
+  ImageLayer,
+} from '../../domain/video-composition';
 
 export interface FfmpegCommand {
   args: string[];
@@ -100,33 +107,149 @@ function fontClause(fontFamily: string, fontWeight: string | undefined, italic: 
   return file ? `fontfile='${escapeFontFilePath(file)}'` : `font=${resolveFontName(fontFamily)}`;
 }
 
+/**
+ * Recorta un valor normalizado 0..1 y lo lleva a píxeles del lienzo, forzando un mínimo
+ * de 2px: FFmpeg rechaza `crop` con ancho o alto 0.
+ */
+function toPixels(normalized: number, total: number, min = 0): number {
+  return Math.max(min, Math.min(total, Math.round(normalized * total)));
+}
+
+/**
+ * Cadenas que ocultan regiones del vídeo (logos ajenos, marcas de agua, usuarios).
+ *
+ * Se aplican ANTES de textos e imágenes para que tapen el material original y no lo que
+ * el usuario añade encima. `blur` y `pixelate` recortan la región, la degradan y la vuelven
+ * a superponer; `solid` es un `drawbox` relleno y no necesita recorte.
+ */
+function buildMaskFilters(
+  masks: MaskLayer[],
+  width: number,
+  height: number,
+  inputLabel: string,
+): { chains: string[]; outputLabel: string } {
+  const chains: string[] = [];
+  let current = inputLabel;
+
+  masks.forEach((mask, i) => {
+    const x = toPixels(mask.rect.x, width);
+    const y = toPixels(mask.rect.y, height);
+    // El ancho se limita a lo que queda de lienzo: un rect que se sale rompe `crop`.
+    const w = Math.max(2, Math.min(width - x, toPixels(mask.rect.width, width, 2)));
+    const h = Math.max(2, Math.min(height - y, toPixels(mask.rect.height, height, 2)));
+    if (w < 2 || h < 2) return;
+
+    const enable = `enable='between(t\\,${mask.startTime}\\,${mask.endTime})'`;
+    const out = `mask${i}`;
+
+    if (mask.mode === 'solid') {
+      const color = sanitizeColorForFfmpeg(mask.color ?? '#000000');
+      chains.push(`${current}drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${color}:t=fill:${enable}[${out}]`);
+    } else {
+      const base = `maskbase${i}`;
+      const region = `maskreg${i}`;
+      const done = `maskdone${i}`;
+      const degrade = mask.mode === 'pixelate'
+        // El bloque no puede exceder la región recortada.
+        ? `pixelize=w=${Math.max(2, Math.min(w, Math.round(mask.intensity)))}:h=${Math.max(2, Math.min(h, Math.round(mask.intensity)))}`
+        : `boxblur=${Math.max(1, Math.round(mask.intensity))}:2`;
+
+      chains.push(`${current}split=2[${base}][${region}]`);
+      chains.push(`[${region}]crop=${w}:${h}:${x}:${y},${degrade}[${done}]`);
+      chains.push(`[${base}][${done}]overlay=${x}:${y}:${enable}[${out}]`);
+    }
+
+    current = `[${out}]`;
+  });
+
+  return { chains, outputLabel: current };
+}
+
+/**
+ * Cadenas de logos y stickers. `firstInputIndex` es el índice de entrada de la primera
+ * imagen, que va después de la fuente y de todas las pistas de audio.
+ */
+function buildImageFilters(
+  images: ImageLayer[],
+  width: number,
+  height: number,
+  inputLabel: string,
+  firstInputIndex: number,
+): { chains: string[]; outputLabel: string } {
+  const chains: string[] = [];
+  let current = inputLabel;
+
+  images.forEach((image, i) => {
+    const targetWidth = Math.max(2, toPixels(image.scale, width, 2));
+    const scaled = `img${i}`;
+    const out = `imgout${i}`;
+
+    // `-1` mantiene el aspecto original de la imagen.
+    const prepare = [`[${firstInputIndex + i}:v]scale=${targetWidth}:-1`];
+    if (image.opacity < 1) {
+      // colorchannelmixer sobre rgba es la vía fiable para opacidad parcial:
+      // `overlay` por sí solo no acepta un factor de opacidad.
+      prepare.push(`format=rgba`, `colorchannelmixer=aa=${image.opacity}`);
+    }
+    chains.push(`${prepare.join(',')}[${scaled}]`);
+
+    // `position` es el CENTRO, así que se descuenta media imagen. w/h los resuelve
+    // FFmpeg en tiempo de ejecución con las dimensiones reales ya escaladas.
+    const cx = toPixels(image.position.x, width);
+    const cy = toPixels(image.position.y, height);
+    const enable = `enable='between(t\\,${image.startTime}\\,${image.endTime})'`;
+    chains.push(`${current}[${scaled}]overlay=x=${cx}-w/2:y=${cy}-h/2:${enable}[${out}]`);
+
+    current = `[${out}]`;
+  });
+
+  return { chains, outputLabel: current };
+}
+
 export function buildRenderCommand(
   composition: VideoComposition,
   sourcePath: string,
   outputPath: string,
   audioInputPaths: string[] = [],
+  imageInputPaths: string[] = [],
 ): FfmpegCommand {
   const args: string[] = [];
 
+  // Recorte del material: `-ss`/`-t` como opciones de ENTRADA (antes de `-i`) para que
+  // FFmpeg busque y descarte sin decodificar de más, y para que los timestamps de salida
+  // arranquen en 0. Por eso los tiempos de overlays y audio son relativos al recorte.
+  const trim = composition.source.trim;
+  const trimDuration =
+    trim && trim.end > trim.start ? trim.end - trim.start : null;
+  if (trim && trimDuration !== null) {
+    args.push('-ss', String(trim.start), '-t', String(trimDuration));
+  }
   args.push('-i', sourcePath);
 
   for (const audioPath of audioInputPaths) {
     args.push('-i', audioPath);
   }
+  for (const imagePath of imageInputPaths) {
+    args.push('-i', imagePath);
+  }
 
-  const videoFilters: string[] = [];
+  /**
+   * Cada elemento es una CADENA completa del filtergraph y se unen con `;`.
+   * Antes se unía todo con `,`, que solo es correcto dentro de una misma cadena: las ramas
+   * con labels propios (fit-blur, overlays) funcionaban de milagro y no sobrevivían a
+   * añadir más capas.
+   */
+  const chains: string[] = [];
   const { output } = composition;
 
   const fitMode = composition.videoFit?.mode ?? 'crop';
-  const textOverlays = composition.textTracks.filter(
-    (t) => t.startTime < t.endTime,
-  );
-  const brandOverlays = composition.overlays.filter(
-    (o) => o.startTime < o.endTime,
-  );
+  const textOverlays = composition.textTracks.filter((t) => t.startTime < t.endTime);
+  const brandOverlays = composition.overlays.filter((o) => o.startTime < o.endTime);
+  const masks = (composition.masks ?? []).filter((m) => m.startTime < m.endTime);
+  const images = (composition.images ?? []).filter((i) => i.startTime < i.endTime);
 
   if (fitMode === 'fit-blur') {
-    videoFilters.push(
+    chains.push(
       `[0:v]split=2[bg][fg]`,
       `[bg]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,crop=${output.width}:${output.height},boxblur=20:5,eq=brightness=-0.1[blurred]`,
       `[fg]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease[scaled]`,
@@ -134,30 +257,45 @@ export function buildRenderCommand(
     );
   } else if (fitMode === 'fit-background') {
     const bgColor = composition.videoFit?.backgroundColor ?? '#000000';
-    videoFilters.push(
+    chains.push(
       `color=c=${bgColor}:s=${output.width}x${output.height}:d=999[canvas]`,
       `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease[scaled]`,
       `[canvas][scaled]overlay=(W-w)/2:(H-h)/2:shortest=1,fps=${output.fps},format=yuv420p[composed]`,
     );
   } else {
-    // crop (default)
-    videoFilters.push(
-      `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase`,
-      `crop=${output.width}:${output.height}`,
-      `fps=${output.fps}`,
-      'format=yuv420p[composed]',
+    // crop (por defecto): una sola cadena, con sus filtros separados por comas.
+    chains.push(
+      `[0:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,` +
+      `crop=${output.width}:${output.height},` +
+      `fps=${output.fps},` +
+      `format=yuv420p[composed]`,
     );
   }
 
-  const inputLabel = '[composed]';
-  let currentInputLabel = inputLabel;
+  let currentInputLabel = '[composed]';
+
+  // Orden de composición: máscaras -> imágenes -> textos -> marca.
+  // Las máscaras van primero para que tapen el material original, no lo que se añade.
+  const maskResult = buildMaskFilters(masks, output.width, output.height, currentInputLabel);
+  chains.push(...maskResult.chains);
+  currentInputLabel = maskResult.outputLabel;
+
+  const imageResult = buildImageFilters(
+    images,
+    output.width,
+    output.height,
+    currentInputLabel,
+    1 + audioInputPaths.length,
+  );
+  chains.push(...imageResult.chains);
+  currentInputLabel = imageResult.outputLabel;
+
   let overlayIndex = 0;
 
   for (const text of textOverlays) {
     const filters = buildTextOverlayFilters(text, output.width, output.height, currentInputLabel, overlayIndex);
     if (filters.length > 0) {
-      videoFilters.push(...filters);
-      // The last filter's output becomes the input for the next overlay
+      chains.push(...filters);
       const lastFilter = filters[filters.length - 1];
       const outputMatch = lastFilter.match(/\[(\w+)\]\s*$/);
       if (outputMatch) {
@@ -170,7 +308,7 @@ export function buildRenderCommand(
   for (const brand of brandOverlays) {
     const filters = buildBrandOverlayFilters(brand, output.width, output.height, currentInputLabel, overlayIndex);
     if (filters.length > 0) {
-      videoFilters.push(...filters);
+      chains.push(...filters);
       const lastFilter = filters[filters.length - 1];
       const outputMatch = lastFilter.match(/\[(\w+)\]\s*$/);
       if (outputMatch) {
@@ -180,25 +318,17 @@ export function buildRenderCommand(
     }
   }
 
-  // Final output label
-  if (currentInputLabel !== '[vout]') {
-    videoFilters.push(`${currentInputLabel}null[vout]`);
-  }
+  chains.push(`${currentInputLabel}null[vout]`);
 
   const hasAudioTracks = composition.audioTracks.length > 0;
   const hasOriginalAudio = composition.keepOriginalAudio;
+  const hasAudio = hasAudioTracks || hasOriginalAudio;
 
-  if (hasAudioTracks || hasOriginalAudio) {
-    const audioFilters = buildAudioFilters(composition);
-    const videoChain = videoFilters.join(',');
-    const allFilters = [videoChain, ...audioFilters];
-    args.push('-filter_complex', allFilters.join(';'));
-    args.push('-map', '[vout]');
+  const allChains = hasAudio ? [...chains, ...buildAudioFilters(composition)] : chains;
+  args.push('-filter_complex', allChains.join(';'));
+  args.push('-map', '[vout]');
+  if (hasAudio) {
     args.push('-map', '[aout]');
-  } else {
-    const videoChain = videoFilters.join(',');
-    args.push('-filter_complex', videoChain);
-    args.push('-map', '[vout]');
   }
 
   args.push(
@@ -209,7 +339,7 @@ export function buildRenderCommand(
     '-r', String(output.fps),
   );
 
-  if (hasAudioTracks || hasOriginalAudio) {
+  if (hasAudio) {
     args.push(
       '-c:a', 'aac',
       '-b:a', output.audioBitrate ?? '192k',
@@ -218,11 +348,7 @@ export function buildRenderCommand(
     );
   }
 
-  if (output.movflags) {
-    args.push('-movflags', output.movflags);
-  } else {
-    args.push('-movflags', '+faststart');
-  }
+  args.push('-movflags', output.movflags || '+faststart');
   args.push(outputPath);
 
   return { args };
