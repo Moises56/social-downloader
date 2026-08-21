@@ -175,11 +175,21 @@ export class StudioStore {
 
   constructor() {
     effect(() => {
+      // Hay que LEER aquí todo lo que se persiste: el efecto solo se vuelve a ejecutar
+      // por las señales que toca, así que un campo añadido a saveToLocalStorage() sin
+      // añadirlo también aquí nunca llega a guardarse.
       const _source = this.sourceAsset();
       const _overlays = this.textOverlays();
       const _audio = this.audioTracks();
       const _composition = this.composition();
       const _brandPosition = this.brandCustomPosition();
+      const _masks = this.masks();
+      const _images = this.images();
+      const _trim = this.sourceTrim();
+      const _keepAudio = this.keepOriginalAudio();
+      const _originalVolume = this.originalAudioVolume();
+      const _fitMode = this.videoFitMode();
+      const _fitColor = this.videoFitBackgroundColor();
 
       if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
       this.autosaveTimer = setTimeout(() => {

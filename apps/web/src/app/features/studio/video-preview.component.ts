@@ -79,15 +79,27 @@ interface DragState {
           }
 
           @for (image of visibleImages(); track image.id) {
-            <img
-              class="image-layer"
-              [class.selected]="selectedOverlayId() === image.id"
-              [attr.data-image-id]="image.id"
-              [src]="imageSources()[image.assetId] ?? ''"
-              [style]="getImageStyle(image)"
-              alt=""
-              draggable="false"
-              (pointerdown)="onImagePointerDown($event, image.id)">
+            @if (imageSources()[image.assetId]; as imageSrc) {
+              <img
+                class="image-layer"
+                [class.selected]="selectedOverlayId() === image.id"
+                [attr.data-image-id]="image.id"
+                [src]="imageSrc"
+                [style]="getImageStyle(image)"
+                alt=""
+                draggable="false"
+                (pointerdown)="onImagePointerDown($event, image.id)">
+            } @else {
+              <div
+                class="image-layer image-layer-placeholder"
+                [class.selected]="selectedOverlayId() === image.id"
+                [attr.data-image-id]="image.id"
+                [style]="getImageStyle(image)"
+                [title]="image.fileName + ' — se aplicará al renderizar'"
+                (pointerdown)="onImagePointerDown($event, image.id)">
+                <span class="placeholder-name">{{ image.fileName }}</span>
+              </div>
+            }
           }
 
           @for (overlay of visibleTextOverlays(); track overlay.id) {
@@ -277,6 +289,23 @@ interface DragState {
       outline: 1.5px solid var(--color-accent, #3b82f6);
       outline-offset: 2px;
     }
+    /* Sin la imagen no hay alto intrinseco que heredar, asi que se fija uno cuadrado
+       para que la capa siga siendo visible y agarrable. */
+    .image-layer-placeholder {
+      aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 4px;
+      border: 1px dashed rgba(241, 245, 249, 0.5);
+      border-radius: 4px;
+      background: rgba(10, 14, 26, 0.55);
+    }
+    .placeholder-name {
+      font-size: 10px; line-height: 1.3; text-align: center;
+      color: #f1f5f9;
+      overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      pointer-events: none;
+    }
 
     .safe-zone {
       position: absolute; left: 0; right: 0;
@@ -336,8 +365,15 @@ export class VideoPreviewComponent implements OnDestroy {
   readonly selectedOverlayId = input<string | null>(null);
   readonly masks = input<MaskLayer[]>([]);
   readonly images = input<ImageLayer[]>([]);
-  /** assetId -> object URL local, para poder previsualizar sin pedir el fichero al servidor. */
-  readonly imageSources = input<Record<string, string>>({});
+  /**
+   * assetId -> object URL local, para poder previsualizar sin pedir el fichero al servidor.
+   *
+   * El valor es opcional a propósito: al recuperar una sesión guardada, las capas de imagen
+   * vuelven con su `assetId` pero los object URL no sobreviven a recargar la página, así que
+   * el lookup falla legítimamente. Tiparlo como `string` a secas haría que el compilador
+   * diera el `??` por redundante y se acabaría quitando una guarda que sí hace falta.
+   */
+  readonly imageSources = input<Record<string, string | undefined>>({});
   /**
    * Segundo del material donde empieza el recorte. El editor trabaja en tiempo del
    * recorte (0 = primer fotograma que se exporta) y el <video> en tiempo del fichero,

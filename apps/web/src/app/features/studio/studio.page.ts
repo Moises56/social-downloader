@@ -1115,7 +1115,7 @@ export class StudioPageComponent {
    * assetId -> object URL local. El fichero ya está en el navegador cuando se sube, así
    * que la previsualización no necesita volver a pedirlo al servidor.
    */
-  readonly imageSources = signal<Record<string, string>>({});
+  readonly imageSources = signal<Record<string, string | undefined>>({});
 
   readonly selectedMask = computed(() => {
     const id = this.selectedOverlayId();
@@ -1163,7 +1163,15 @@ export class StudioPageComponent {
     });
 
     const autosaveData = this.store.loadFromLocalStorage();
-    if (autosaveData && (autosaveData.textOverlays.length > 0 || autosaveData.audioTracks.length > 0)) {
+    // Una sesión con solo máscaras, imágenes o un recorte también merece recuperarse.
+    const hasRecoverableWork = !!autosaveData && (
+      autosaveData.textOverlays.length > 0 ||
+      autosaveData.audioTracks.length > 0 ||
+      (autosaveData.masks?.length ?? 0) > 0 ||
+      (autosaveData.images?.length ?? 0) > 0 ||
+      !!autosaveData.sourceTrim
+    );
+    if (hasRecoverableWork) {
       this.showRecoveredBanner.set(true);
       setTimeout(() => this.showRecoveredBanner.set(false), 5000);
     }
