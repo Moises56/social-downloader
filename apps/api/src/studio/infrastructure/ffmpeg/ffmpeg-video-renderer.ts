@@ -41,11 +41,16 @@ export class FfmpegVideoRenderer {
     }
   }
 
+  /**
+   * `renderId` lo provee quien llama (el controller usa el id de su render job) para que
+   * `cancelRender(id)` encuentre el AbortController. Antes se generaba aquí dentro, así que
+   * el id nunca coincidía con el que se usaba para cancelar y FFmpeg seguía corriendo.
+   */
   async render(
     composition: VideoComposition,
     onProgress?: (progress: RenderProgress) => void,
+    renderId: string = randomUUID(),
   ): Promise<RenderResult> {
-    const renderId = randomUUID();
     const renderDir = await this.storage.createRenderDir(renderId);
     const outputPath = join(renderDir, 'output.mp4');
 
@@ -73,20 +78,24 @@ export class FfmpegVideoRenderer {
 
     const duration = composition.source.duration ?? 30;
 
-    const result = await this.ffmpeg.runFfmpeg({
-      args,
-      timeoutMs: 600_000,
-      signal: abortController.signal,
-      onStderr: (chunk) => {
-        const time = this.ffmpeg.parseProgressTime(chunk);
-        if (time !== null && duration > 0) {
-          const percent = Math.min(99, Math.round((time / duration) * 100));
-          onProgress?.({ phase: 'rendering', percent });
-        }
-      },
-    });
-
-    this.abortControllers.delete(renderId);
+    let result;
+    try {
+      result = await this.ffmpeg.runFfmpeg({
+        args,
+        timeoutMs: 600_000,
+        signal: abortController.signal,
+        onStderr: (chunk) => {
+          const time = this.ffmpeg.parseProgressTime(chunk);
+          if (time !== null && duration > 0) {
+            const percent = Math.min(99, Math.round((time / duration) * 100));
+            onProgress?.({ phase: 'rendering', percent });
+          }
+        },
+      });
+    } finally {
+      // También en cancelación, timeout o fallo: si no, el Map crece sin límite.
+      this.abortControllers.delete(renderId);
+    }
 
     if (result.exitCode !== 0) {
       onProgress?.({ phase: 'failed' });

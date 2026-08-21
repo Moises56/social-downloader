@@ -5,6 +5,34 @@ import { environment } from '../environments/environment';
 import { UrlFormComponent } from './url-form.component';
 import { MediaDetailsComponent, DownloadParams, DownloadState } from './media-details.component';
 
+/** Error de la API que conserva el `code` de `{ code, message }`, no solo el texto. */
+class ApiFetchError extends Error {
+  constructor(message: string, readonly code: string | null) {
+    super(message);
+    this.name = 'ApiFetchError';
+  }
+
+  static async from(response: Response, fallback: string): Promise<ApiFetchError> {
+    const body = await response.json().catch(() => null);
+    return new ApiFetchError(body?.message ?? fallback, body?.code ?? null);
+  }
+}
+
+/**
+ * Copy propio solo para los códigos en los que la interfaz aporta algo más que el mensaje
+ * del servidor (una pista de qué hacer). Para el resto se usa el del backend.
+ */
+const DOWNLOADER_ERROR_COPY: Record<string, string> = {
+  UNSUPPORTED_PLATFORM: 'Esta plataforma no es compatible aún.',
+  INVALID_URL: 'La URL no parece válida. Verifica que sea correcta.',
+  AUTH_REQUIRED: 'Este contenido requiere iniciar sesión en la red social.',
+  GEO_RESTRICTED: 'No disponible en tu región.',
+  YTDLP_NOT_AVAILABLE: 'Servicio no disponible temporalmente. Inténtalo en un momento.',
+  ANALYSIS_TIMEOUT: 'El análisis tardó demasiado. Prueba con otra URL.',
+  DOWNLOAD_TIMEOUT: 'La descarga tardó demasiado. Inténtalo de nuevo.',
+  INVALID_DOWNLOAD_TOKEN: 'El enlace de descarga expiró. Vuelve a intentarlo.',
+};
+
 @Component({
   selector: 'app-downloader-page',
   standalone: true,
@@ -138,8 +166,7 @@ export class DownloaderPageComponent {
     })
       .then(async (response) => {
         if (!response.ok) {
-          const errorBody = await response.json().catch(() => null);
-          throw new Error(errorBody?.message ?? 'No se pudo analizar la URL.');
+          throw await ApiFetchError.from(response, 'No se pudo analizar la URL.');
         }
         this.media.set(await response.json() as MediaMetadata);
       })
@@ -170,7 +197,7 @@ export class DownloaderPageComponent {
       body: JSON.stringify({ url: item.sourceUrl, type: params.type, ...(params.quality ? { quality: params.quality } : {}), ...(params.audioFormat ? { audioFormat: params.audioFormat } : {}) }),
     })
       .then(async (response) => {
-        if (!response.ok) { const e = await response.json().catch(() => null); throw new Error(e?.message ?? 'No se pudo preparar la descarga.'); }
+        if (!response.ok) { throw await ApiFetchError.from(response, 'No se pudo preparar la descarga.'); }
         const data = (await response.json()) as { downloadUrl?: string };
         if (!data.downloadUrl) throw new Error('No se recibió URL de descarga.');
         this.downloadState.set('downloading');
@@ -185,20 +212,24 @@ export class DownloaderPageComponent {
       .finally(() => { this.downloading.set(false); });
   }
 
+  /**
+   * La API responde `{ code, message }`. Antes esto comparaba `error.message` contra los
+   * códigos, así que nunca acertaba y todo acababa en el mensaje genérico. Ahora se decide
+   * por `code`, y si no hay copy propio para ese código se usa el mensaje del servidor,
+   * que ya viene en español.
+   */
   private getErrorMessage(error: unknown): string {
     if (!(error instanceof Error)) return 'Ocurrió un error inesperado.';
-    const msg = error.message;
-    if (msg === 'UNSUPPORTED_PLATFORM') return 'Esta plataforma no es compatible aún.';
-    if (msg === 'INVALID_URL') return 'La URL no parece válida. Verifica que sea correcta.';
-    if (msg === 'MEDIA_NOT_AVAILABLE') return 'No pudimos acceder a este contenido.';
-    if (msg === 'PRIVATE_MEDIA') return 'Este contenido es privado.';
-    if (msg === 'AUTH_REQUIRED') return 'Requiere iniciar sesión.';
-    if (msg === 'GEO_RESTRICTED') return 'No disponible en tu región.';
-    if (msg === 'DOWNLOAD_TOO_LARGE') return 'El archivo excede el tamaño máximo.';
-    if (msg === 'SSRF_BLOCKED') return 'URL restringida.';
-    if (msg === 'YTDLP_NOT_AVAILABLE') return 'Servicio no disponible temporalmente.';
-    if (msg.includes('fetch')) return 'No se pudo conectar con el servidor.';
-    return 'No se pudo completar la operación.';
+
+    const code = error instanceof ApiFetchError ? error.code : null;
+    if (code && code in DOWNLOADER_ERROR_COPY) {
+      return DOWNLOADER_ERROR_COPY[code];
+    }
+    if (error instanceof ApiFetchError) {
+      return error.message;
+    }
+    // Sin respuesta de la API: el fetch no llegó a salir (servidor caído, red, CORS).
+    return 'No se pudo conectar con el servidor.';
   }
 
   private getSuggestedFilename(title: string, type: string, quality?: number | null, format?: AudioFormat | null): string {

@@ -9,3 +9,6 @@ temp/
 coverage/
 playwright-report/
 test-results/
+
+# Notas locales con credenciales — NUNCA commitear
+docts/

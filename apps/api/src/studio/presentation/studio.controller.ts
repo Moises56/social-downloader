@@ -10,8 +10,10 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiError } from '../../media/shared/errors';
 import type { Response } from 'express';
 import { createReadStream } from 'node:fs';
 import { access } from 'node:fs/promises';
@@ -47,6 +49,18 @@ import { AudioMixingService } from '../application/audio-mixing.service';
 import { TempAssetStorage } from '../infrastructure/storage/temp-asset-storage.service';
 import { FfmpegVideoRenderer } from '../infrastructure/ffmpeg/ffmpeg-video-renderer';
 import { DEFAULT_OUTPUT } from '../domain/video-composition';
+
+// Indexado por render id (NO por compositionId): dos renders de la misma composición son
+// dos jobs distintos, y antes el segundo sobrescribía al primero.
+/**
+ * Tope de subida. El fichero se retiene entero en memoria (multer memoryStorage), así que
+ * este límite es lo único que separa una subida grande de tumbar el proceso.
+ * TODO: pasar a diskStorage para no depender del tamaño en RAM.
+ */
+const MAX_UPLOAD_BYTES = Number(process.env.STUDIO_MAX_UPLOAD_MB ?? 512) * 1024 * 1024;
+
+/** Studio compone vídeo y audio; las imágenes llegarán con las capas de imagen. */
+const ACCEPTED_UPLOAD_TYPES = /^(video|audio)\//;
 
 const renderJobs = new Map<string, { render: RenderedVideo; composition: VideoComposition }>();
 const compositionJobs = new Map<string, VideoComposition>();
@@ -94,11 +108,26 @@ export class StudioController {
   }
 
   @Post('sources/upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+      fileFilter: (_req, file, cb) => {
+        if (!ACCEPTED_UPLOAD_TYPES.test(file.mimetype)) {
+          cb(new ApiError('STUDIO_UNSUPPORTED_FORMAT', `Tipo no admitido: ${file.mimetype}`), false);
+          return;
+        }
+        cb(null, true);
+      },
+    }),
+  )
   @HttpCode(HttpStatus.CREATED)
   async uploadSource(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: Express.Multer.File | undefined,
   ) {
+    if (!file) {
+      throw new ApiError('STUDIO_INVALID_SOURCE', 'No se recibió ningún archivo.');
+    }
+
     const { id, size } = await this.storage.createAsset(
       file.originalname,
       file.buffer,
@@ -141,7 +170,7 @@ export class StudioController {
   ): Promise<CreateCompositionResponse> {
     const assetPath = await this.storage.resolveAssetPath(body.sourceAssetId);
     if (!assetPath) {
-      throw new Error('Asset not found');
+      throw new ApiError('STUDIO_ASSET_NOT_FOUND');
     }
 
     let duration = 0;
@@ -216,7 +245,7 @@ export class StudioController {
   ): DuplicateCompositionResponse {
     const original = compositionJobs.get(body.compositionId);
     if (!original) {
-      throw new Error('Composition not found');
+      throw new ApiError('STUDIO_COMPOSITION_NOT_FOUND');
     }
 
     const duplicate: VideoComposition = {
@@ -241,7 +270,7 @@ export class StudioController {
   ): SaveCompositionPresetResponse {
     const composition = compositionJobs.get(body.compositionId);
     if (!composition) {
-      throw new Error('Composition not found');
+      throw new ApiError('STUDIO_COMPOSITION_NOT_FOUND');
     }
 
     const preset: SavedCompositionPreset = {
@@ -269,7 +298,7 @@ export class StudioController {
   @HttpCode(HttpStatus.OK)
   deleteSavedPreset(@Param('id') id: string): void {
     if (!savedPresets.has(id)) {
-      throw new Error('Preset not found');
+      throw new NotFoundException('Preset no encontrado');
     }
     savedPresets.delete(id);
   }
@@ -281,7 +310,7 @@ export class StudioController {
   ): Promise<StartRenderResponse> {
     const composition = compositionJobs.get(body.compositionId);
     if (!composition) {
-      throw new Error('Composition not found');
+      throw new ApiError('STUDIO_COMPOSITION_NOT_FOUND');
     }
 
     const render: RenderedVideo = {
@@ -291,9 +320,9 @@ export class StudioController {
       createdAt: new Date().toISOString(),
     };
 
-    renderJobs.set(body.compositionId, { render, composition });
+    renderJobs.set(render.id, { render, composition });
 
-    this.executeRender(body.compositionId).catch(() => {});
+    this.executeRender(render.id).catch(() => {});
 
     return { render };
   }
@@ -309,24 +338,30 @@ export class StudioController {
       'Connection': 'keep-alive',
     });
 
-    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    const entry = renderJobs.get(id);
     if (!entry) {
       res.write(`data: ${JSON.stringify({ phase: 'failed', percent: 0 })}\n\n`);
       res.end();
       return;
     }
 
+    const isTerminal = (): boolean =>
+      entry.render.status === 'completed' ||
+      entry.render.status === 'failed' ||
+      entry.render.status === 'cancelled';
+
     const sendProgress = (): void => {
       const data = {
         phase: entry.render.status === 'completed' ? 'completed'
           : entry.render.status === 'failed' ? 'failed'
+          : entry.render.status === 'cancelled' ? 'cancelled'
           : entry.render.status === 'rendering' ? 'rendering'
           : 'preparing',
         percent: entry.render.progress ?? 0,
       };
       res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-      if (entry.render.status === 'completed' || entry.render.status === 'failed') {
+      if (isTerminal()) {
         res.end();
       }
     };
@@ -334,7 +369,7 @@ export class StudioController {
     sendProgress();
     const interval = setInterval(() => {
       sendProgress();
-      if (entry.render.status === 'completed' || entry.render.status === 'failed') {
+      if (isTerminal()) {
         clearInterval(interval);
       }
     }, 500);
@@ -345,9 +380,9 @@ export class StudioController {
   @Post('renders/:id/cancel')
   @HttpCode(HttpStatus.OK)
   cancelRender(@Param('id') id: string): void {
-    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    const entry = renderJobs.get(id);
     if (!entry) {
-      throw new Error('Render not found');
+      throw new ApiError('STUDIO_RENDER_NOT_FOUND');
     }
     this.renderer.cancelRender(entry.render.id);
     entry.render = {
@@ -361,9 +396,9 @@ export class StudioController {
   getRenderStatus(
     @Param('id') id: string,
   ): RenderStatusResponse {
-    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    const entry = renderJobs.get(id);
     if (!entry) {
-      throw new Error('Render not found');
+      throw new ApiError('STUDIO_RENDER_NOT_FOUND');
     }
     return { render: entry.render };
   }
@@ -373,15 +408,15 @@ export class StudioController {
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const entry = Array.from(renderJobs.values()).find((e) => e.render.id === id);
+    const entry = renderJobs.get(id);
     if (!entry || !entry.render.filePath) {
-      throw new Error('Render not found');
+      throw new ApiError('STUDIO_RENDER_NOT_FOUND');
     }
 
     try {
       await access(entry.render.filePath);
     } catch {
-      throw new Error('Render file not found');
+      throw new ApiError('STUDIO_RENDER_NOT_FOUND', 'El archivo del render ya no está disponible');
     }
 
     res.set({
@@ -392,21 +427,25 @@ export class StudioController {
     createReadStream(entry.render.filePath).pipe(res);
   }
 
-  private async executeRender(compositionId: string): Promise<void> {
-    const entry = renderJobs.get(compositionId);
+  private async executeRender(renderId: string): Promise<void> {
+    const entry = renderJobs.get(renderId);
     if (!entry) return;
 
     entry.render.status = 'rendering';
 
     try {
-      const result = await this.renderer.render(entry.composition, (progress) => {
-        entry.render.progress = progress.percent;
-        if (progress.phase === 'completed') {
-          entry.render.status = 'completed';
-        } else if (progress.phase === 'failed') {
-          entry.render.status = 'failed';
-        }
-      });
+      const result = await this.renderer.render(
+        entry.composition,
+        (progress) => {
+          entry.render.progress = progress.percent;
+          if (progress.phase === 'completed') {
+            entry.render.status = 'completed';
+          } else if (progress.phase === 'failed') {
+            entry.render.status = 'failed';
+          }
+        },
+        renderId,
+      );
       entry.render = {
         ...entry.render,
         status: 'completed',

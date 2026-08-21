@@ -14,7 +14,7 @@ import { TempAssetStorage } from './infrastructure/storage/temp-asset-storage.se
 import { buildProbeCommand } from './infrastructure/ffmpeg/ffmpeg-command-builder';
 import type { VideoComposition } from './domain/video-composition';
 import { DEFAULT_OUTPUT } from './domain/video-composition';
-import { readFile } from 'node:fs/promises';
+import { readFile, access } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 const SOURCE_PATH = '/tmp/test-source.mp4';
@@ -35,6 +35,26 @@ async function main(): Promise<void> {
 
   // 2. Create asset from test source
   console.log('2. Creating asset from test source...');
+  // El fixture se genera aquí si falta: antes el script asumía que ya existía y moría con
+  // ENOENT en cuanto se ejecutaba en limpio.
+  try {
+    await access(SOURCE_PATH);
+  } catch {
+    console.log('   Fixture ausente, generándolo con FFmpeg...');
+    const { execFileSync } = await import('node:child_process');
+    execFileSync(
+      ffmpegPath,
+      [
+        '-y',
+        '-f', 'lavfi', '-i', 'color=c=blue:s=1080x1920:d=15,format=yuv420p',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=15',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '64k',
+        SOURCE_PATH,
+      ],
+      { timeout: 60_000 },
+    );
+  }
   const sourceBuffer = await readFile(SOURCE_PATH);
   const { id: assetId } = await storage.createAsset('test-source.mp4', sourceBuffer);
   console.log(`   Asset ID: ${assetId}`);

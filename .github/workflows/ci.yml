@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '10.15.0'
+
+jobs:
+  # Rápido: sin binarios multimedia, falla en menos de un minuto si algo básico se rompe.
+  check:
+    name: Lint · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  # Renders reales de FFmpeg verificados con ffprobe.
+  integration:
+    name: FFmpeg integration
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Instalar FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Verificar que este FFmpeg soporta drawtext
+        # El pipeline de texto depende de libfreetype. Mejor fallar aquí, con un mensaje
+        # claro, que a mitad de un render con "No such filter: 'drawtext'".
+        run: |
+          ffmpeg -hide_banner -filters | grep -qE '^\s*\S+\s+drawtext\s' \
+            || { echo "::error::Este build de FFmpeg no trae drawtext (falta libfreetype)"; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @social-downloader/api test:integration
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Instalar FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @social-downloader/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @social-downloader/web test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
