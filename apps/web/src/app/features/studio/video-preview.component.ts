@@ -1,6 +1,6 @@
 import { Component, ElementRef, inject, input, OnDestroy, output, signal, viewChild, afterNextRender, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import type { TextOverlay, BrandOverlay } from '@social-downloader/contracts';
+import type { TextOverlay, BrandOverlay, MaskLayer, ImageLayer } from '@social-downloader/contracts';
 import {
   NormalizedPosition,
   POSITION_PRESETS,
@@ -9,6 +9,22 @@ import {
   snapAxis,
   computeSnapPoints,
 } from './editor/position';
+
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
+
+/**
+ * Arrastre de máscaras e imágenes. Va aparte de `DragState` a propósito: ese camino lleva
+ * el imán a centro y safe zones de textos y marca, con sus tests, y una máscara necesita
+ * colocarse exactamente sobre un logo — sin que nada la desvíe.
+ */
+interface LayerDragState {
+  kind: 'mask-move' | 'mask-resize' | 'image-move';
+  id: string;
+  handle?: ResizeHandle;
+  startRect: { x: number; y: number; width: number; height: number };
+  startPointerX: number;
+  startPointerY: number;
+}
 
 interface DragState {
   overlayId: string;
@@ -41,6 +57,39 @@ interface DragState {
         </video>
 
         <div class="overlays-layer">
+          <!-- Máscaras primero: tapan el material original, nunca lo que se añade encima
+               (mismo orden que el render). -->
+          @for (mask of visibleMasks(); track mask.id) {
+            <div
+              class="mask-layer"
+              [class.selected]="selectedOverlayId() === mask.id"
+              [attr.data-mask-id]="mask.id"
+              [style]="getMaskStyle(mask)"
+              (pointerdown)="onMaskPointerDown($event, mask.id)">
+              <span class="mask-tag">{{ maskLabel(mask) }}</span>
+              @if (selectedOverlayId() === mask.id) {
+                @for (handle of resizeHandles; track handle) {
+                  <span
+                    class="mask-handle"
+                    [class]="'mask-handle handle-' + handle"
+                    (pointerdown)="onMaskResizeStart($event, mask.id, handle)"></span>
+                }
+              }
+            </div>
+          }
+
+          @for (image of visibleImages(); track image.id) {
+            <img
+              class="image-layer"
+              [class.selected]="selectedOverlayId() === image.id"
+              [attr.data-image-id]="image.id"
+              [src]="imageSources()[image.assetId] ?? ''"
+              [style]="getImageStyle(image)"
+              alt=""
+              draggable="false"
+              (pointerdown)="onImagePointerDown($event, image.id)">
+          }
+
           @for (overlay of visibleTextOverlays(); track overlay.id) {
             <div
               class="text-overlay"
@@ -162,6 +211,73 @@ interface DragState {
       z-index: 1;
     }
 
+    /* ── Máscaras ──────────────────────────────────────────────────────────
+       Se dibujan sobre el vídeo pero por debajo de textos y marca, igual que en el
+       render. El borde punteado marca que es una zona de edición, no algo que se vea
+       en el vídeo final: lo que se exporta es el desenfoque, no el contorno. */
+    .mask-layer {
+      position: absolute;
+      z-index: 20;
+      cursor: move;
+      border: 1px dashed rgba(241, 245, 249, 0.45);
+      border-radius: 2px;
+      touch-action: none;
+    }
+    .mask-layer:hover { border-color: rgba(241, 245, 249, 0.8); }
+    .mask-layer.selected {
+      border: 1.5px solid var(--color-accent, #3b82f6);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+    }
+
+    .mask-tag {
+      /* Centrada: en la esquina se solapaba con el asa de redimensionar. */
+      position: absolute; top: -2px; left: 50%;
+      transform: translate(-50%, -100%);
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      line-height: 1.4;
+      color: #f1f5f9;
+      background: rgba(10, 14, 26, 0.85);
+      border-radius: 3px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .mask-handle {
+      position: absolute;
+      width: 10px; height: 10px;
+      background: var(--color-accent, #3b82f6);
+      border: 1.5px solid #f1f5f9;
+      border-radius: 2px;
+      /* El asa visible es pequeña para no tapar el logo que se está encuadrando; el área
+         real de agarre se amplía con el ::after, que es lo que hace usable el redimensionado. */
+      touch-action: none;
+    }
+    .mask-handle::after {
+      content: ''; position: absolute; inset: -8px;
+    }
+    .handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+    .handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+    .handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+    .handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+    /* ── Capas de imagen ──────────────────────────────────────────────────── */
+    .image-layer {
+      position: absolute;
+      z-index: 30;
+      cursor: move;
+      height: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+      touch-action: none;
+    }
+    .image-layer.selected {
+      outline: 1.5px solid var(--color-accent, #3b82f6);
+      outline-offset: 2px;
+    }
+
     .safe-zone {
       position: absolute; left: 0; right: 0;
       border: 1px dashed rgba(255, 255, 0, 0.35);
@@ -218,10 +334,22 @@ export class VideoPreviewComponent implements OnDestroy {
   readonly duration = input<number>(0);
   readonly showSafeZones = input<boolean>(false);
   readonly selectedOverlayId = input<string | null>(null);
+  readonly masks = input<MaskLayer[]>([]);
+  readonly images = input<ImageLayer[]>([]);
+  /** assetId -> object URL local, para poder previsualizar sin pedir el fichero al servidor. */
+  readonly imageSources = input<Record<string, string>>({});
+  /**
+   * Segundo del material donde empieza el recorte. El editor trabaja en tiempo del
+   * recorte (0 = primer fotograma que se exporta) y el <video> en tiempo del fichero,
+   * así que hay que trasladar en ambos sentidos o el preview enseña el trozo equivocado.
+   */
+  readonly trimOffset = input<number>(0);
 
   readonly timeChange = output<number>();
   readonly overlaySelect = output<string | null>();
   readonly overlayPositionChange = output<{ id: string; type: 'text' | 'brand'; position: NormalizedPosition }>();
+  readonly maskRectChange = output<{ id: string; rect: { x: number; y: number; width: number; height: number } }>();
+  readonly imagePositionChange = output<{ id: string; position: NormalizedPosition }>();
 
   readonly videoEl = viewChild.required<ElementRef<HTMLVideoElement>>('videoEl');
   readonly viewport = viewChild.required<ElementRef<HTMLDivElement>>('viewport');
@@ -229,6 +357,8 @@ export class VideoPreviewComponent implements OnDestroy {
   readonly playing = signal(false);
   readonly currentTime = signal(0);
   readonly dragging = signal<DragState | null>(null);
+  readonly layerDragging = signal<LayerDragState | null>(null);
+  readonly resizeHandles: ResizeHandle[] = ['nw', 'ne', 'sw', 'se'];
   readonly activeGuides = signal<Array<{ axis: 'horizontal' | 'vertical'; style: string }>>([]);
 
   // Tracked reactively (not read imperatively per-call) so overlay pixel positions and
@@ -253,6 +383,8 @@ export class VideoPreviewComponent implements OnDestroy {
 
   @HostListener('window:pointermove', ['$event'])
   onPointerMove(event: PointerEvent): void {
+    if (this.handleLayerPointerMove(event)) return;
+
     const state = this.dragging();
     if (!state) return;
 
@@ -294,8 +426,176 @@ export class VideoPreviewComponent implements OnDestroy {
     this.activeGuides.set(guides);
   }
 
+  /** @returns true si el evento correspondía a una máscara o imagen y ya se ha atendido. */
+  private handleLayerPointerMove(event: PointerEvent): boolean {
+    const drag = this.layerDragging();
+    if (!drag) return false;
+
+    const vp = this.viewport()?.nativeElement;
+    if (!vp) return true;
+
+    const rect = vp.getBoundingClientRect();
+    // Desplazamiento en unidades normalizadas del lienzo, no en píxeles de pantalla:
+    // así el arrastre se comporta igual con el preview a cualquier tamaño.
+    const dx = (event.clientX - drag.startPointerX) / rect.width;
+    const dy = (event.clientY - drag.startPointerY) / rect.height;
+    const base = drag.startRect;
+
+    if (drag.kind === 'image-move') {
+      this.imagePositionChange.emit({
+        id: drag.id,
+        position: {
+          x: Math.min(1, Math.max(0, base.x + dx)),
+          y: Math.min(1, Math.max(0, base.y + dy)),
+        },
+      });
+      return true;
+    }
+
+    if (drag.kind === 'mask-move') {
+      this.maskRectChange.emit({
+        id: drag.id,
+        rect: {
+          ...base,
+          // Se frena en el borde para que la máscara no pueda salirse del lienzo.
+          x: Math.min(1 - base.width, Math.max(0, base.x + dx)),
+          y: Math.min(1 - base.height, Math.max(0, base.y + dy)),
+        },
+      });
+      return true;
+    }
+
+    // Redimensionar: cada asa mueve su esquina y deja fija la opuesta.
+    const MIN = 0.02;
+    let { x, y, width, height } = base;
+    const handle = drag.handle ?? 'se';
+
+    if (handle === 'nw' || handle === 'sw') {
+      const nx = Math.min(base.x + base.width - MIN, Math.max(0, base.x + dx));
+      width = base.x + base.width - nx;
+      x = nx;
+    } else {
+      width = Math.min(1 - base.x, Math.max(MIN, base.width + dx));
+    }
+
+    if (handle === 'nw' || handle === 'ne') {
+      const ny = Math.min(base.y + base.height - MIN, Math.max(0, base.y + dy));
+      height = base.y + base.height - ny;
+      y = ny;
+    } else {
+      height = Math.min(1 - base.y, Math.max(MIN, base.height + dy));
+    }
+
+    this.maskRectChange.emit({ id: drag.id, rect: { x, y, width, height } });
+    return true;
+  }
+
+  onMaskPointerDown(event: PointerEvent, maskId: string): void {
+    // Sin esto, empezar a arrastrar desde un asa movería además toda la máscara.
+    if ((event.target as HTMLElement).classList.contains('mask-handle')) return;
+    event.stopPropagation();
+    event.preventDefault();
+    this.overlaySelect.emit(maskId);
+
+    const mask = this.masks().find((m) => m.id === maskId);
+    if (!mask) return;
+
+    this.layerDragging.set({
+      kind: 'mask-move',
+      id: maskId,
+      startRect: { ...mask.rect },
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+    });
+  }
+
+  onMaskResizeStart(event: PointerEvent, maskId: string, handle: ResizeHandle): void {
+    event.stopPropagation();
+    event.preventDefault();
+
+    const mask = this.masks().find((m) => m.id === maskId);
+    if (!mask) return;
+
+    this.layerDragging.set({
+      kind: 'mask-resize',
+      id: maskId,
+      handle,
+      startRect: { ...mask.rect },
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+    });
+  }
+
+  onImagePointerDown(event: PointerEvent, imageId: string): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.overlaySelect.emit(imageId);
+
+    const image = this.images().find((i) => i.id === imageId);
+    if (!image) return;
+
+    this.layerDragging.set({
+      kind: 'image-move',
+      id: imageId,
+      startRect: { x: image.position.x, y: image.position.y, width: 0, height: 0 },
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+    });
+  }
+
+  visibleMasks(): MaskLayer[] {
+    const t = this.currentTime();
+    return this.masks().filter((m) => t >= m.startTime && t <= m.endTime);
+  }
+
+  visibleImages(): ImageLayer[] {
+    const t = this.currentTime();
+    return this.images().filter((i) => t >= i.startTime && t <= i.endTime);
+  }
+
+  maskLabel(mask: MaskLayer): string {
+    if (mask.mode === 'solid') return 'Color';
+    return mask.mode === 'pixelate' ? 'Pixelado' : 'Desenfoque';
+  }
+
+  getMaskStyle(mask: MaskLayer): Record<string, string> {
+    const base: Record<string, string> = {
+      left: `${mask.rect.x * 100}%`,
+      top: `${mask.rect.y * 100}%`,
+      width: `${mask.rect.width * 100}%`,
+      height: `${mask.rect.height * 100}%`,
+    };
+
+    if (mask.mode === 'solid') {
+      return { ...base, background: mask.color ?? '#000000' };
+    }
+
+    // Aproximación: el navegador no puede reproducir boxblur/pixelize de FFmpeg. El
+    // pixelado se sugiere con un desenfoque más duro y contraste; el fotograma exacto
+    // se comprueba con la previsualización real antes de exportar.
+    const radius = mask.mode === 'pixelate'
+      ? Math.max(2, mask.intensity * 0.5)
+      : Math.max(1, mask.intensity * 0.35);
+    return {
+      ...base,
+      'backdrop-filter': `blur(${radius}px)`,
+      '-webkit-backdrop-filter': `blur(${radius}px)`,
+    };
+  }
+
+  getImageStyle(image: ImageLayer): Record<string, string> {
+    return {
+      left: `${image.position.x * 100}%`,
+      top: `${image.position.y * 100}%`,
+      width: `${image.scale * 100}%`,
+      transform: 'translate(-50%, -50%)',
+      opacity: String(image.opacity),
+    };
+  }
+
   @HostListener('window:pointerup')
   onPointerUp(): void {
+    this.layerDragging.set(null);
     const state = this.dragging();
     if (!state) return;
 
@@ -315,13 +615,27 @@ export class VideoPreviewComponent implements OnDestroy {
     // Drag was interrupted (e.g. an OS/browser gesture took over the pointer) — discard
     // it without committing a position, so the overlay reverts to where it started.
     this.dragging.set(null);
+    // Sin esto, una máscara o imagen interrumpida se quedaba pegada al puntero.
+    this.layerDragging.set(null);
     this.activeGuides.set([]);
   }
 
   onTimeUpdate(event: Event): void {
     const video = event.target as HTMLVideoElement;
-    this.currentTime.set(video.currentTime);
-    this.timeChange.emit(video.currentTime);
+    const editorTime = video.currentTime - this.trimOffset();
+
+    // Al llegar al final del recorte se para: reproducir más allá mostraría material
+    // que no va a salir en el vídeo exportado.
+    if (editorTime >= this.duration()) {
+      video.pause();
+      this.currentTime.set(this.duration());
+      this.timeChange.emit(this.duration());
+      return;
+    }
+
+    const clamped = Math.max(0, editorTime);
+    this.currentTime.set(clamped);
+    this.timeChange.emit(clamped);
   }
 
   onMetadataLoaded(_event: Event): void {
@@ -331,21 +645,30 @@ export class VideoPreviewComponent implements OnDestroy {
   onSeek(event: Event): void {
     const input = event.target as HTMLInputElement;
     const time = Number(input.value);
-    this.videoEl().nativeElement.currentTime = time;
+    this.videoEl().nativeElement.currentTime = this.trimOffset() + time;
     this.currentTime.set(time);
   }
 
   togglePlay(): void {
     const video = this.videoEl().nativeElement;
-    if (video.paused) {
-      video.play();
-    } else {
+    if (!video.paused) {
       video.pause();
+      return;
     }
+
+    // Si el cabezal quedó fuera del recorte (al terminar, o tras mover el recorte),
+    // se vuelve al principio del trozo en vez de reproducir desde donde no toca.
+    const offset = this.trimOffset();
+    const editorTime = video.currentTime - offset;
+    if (editorTime < 0 || editorTime >= this.duration()) {
+      video.currentTime = offset;
+      this.currentTime.set(0);
+    }
+    video.play();
   }
 
   onViewportPointerDown(event: PointerEvent): void {
-    if ((event.target as HTMLElement).closest('.text-overlay, .brand-overlay')) return;
+    if ((event.target as HTMLElement).closest('.text-overlay, .brand-overlay, .mask-layer, .image-layer')) return;
     this.overlaySelect.emit(null);
   }
 

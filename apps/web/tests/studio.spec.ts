@@ -14,6 +14,7 @@ import { join } from 'path';
 const STUDIO_URL = '/studio';
 const FIXTURE_VIDEO = join(__dirname, 'fixtures/test-video.mp4');
 const FIXTURE_MUSIC = join(__dirname, 'fixtures/test-music.mp3');
+const FIXTURE_LOGO = join(__dirname, 'fixtures/test-logo.png');
 
 const uploadVideo = async (page: Page) => {
   await page.locator('input[type="file"][accept="video/*"]').setInputFiles(FIXTURE_VIDEO);
@@ -345,6 +346,83 @@ test.describe('Studio', () => {
       const normY = (hBox.y + hBox.height / 2 - vBox.y) / vBox.height;
       expect(Math.abs(normX - 0.5)).toBeLessThan(0.03);
       expect(Math.abs(normY - 0.5)).toBeLessThan(0.03);
+    });
+  });
+
+  test.describe('Tapar logos, imágenes y recorte', () => {
+    const addMask = async (page: Page) => {
+      await page.locator('.layer-add').filter({ hasText: 'Tapar logo' }).click();
+      await expect(page.locator('.mask-layer')).toBeVisible();
+    };
+
+    test('crear una máscara la muestra en capas, preview y timeline', async ({ page }: { page: Page }) => {
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await addMask(page);
+
+      await expect(page.locator('.elements-panel .layer-item').filter({ hasText: 'Tapar' })).toHaveCount(1);
+      // La pista de la timeline es lo que hace visible su ventana temporal.
+      await expect(page.locator('.track-label').filter({ hasText: 'Tapar' })).toBeVisible();
+      await expect(page.locator('.properties-panel .panel-title')).toHaveText('Tapar logo');
+    });
+
+    test('cambiar el modo de la máscara actualiza su etiqueta', async ({ page }: { page: Page }) => {
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await addMask(page);
+
+      await expect(page.locator('.mask-tag')).toHaveText('Desenfoque');
+      await page.locator('.mode-btn').filter({ hasText: 'Pixelado' }).click();
+      await expect(page.locator('.mask-tag')).toHaveText('Pixelado');
+
+      // En modo color se ofrece el selector, y desaparece el de intensidad.
+      await page.locator('.mode-btn').filter({ hasText: 'Color' }).click();
+      await expect(page.locator('.properties-panel .color-input')).toBeVisible();
+    });
+
+    test('la máscara se puede eliminar', async ({ page }: { page: Page }) => {
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await addMask(page);
+
+      await page.locator('.danger-btn').click();
+      await expect(page.locator('.mask-layer')).toHaveCount(0);
+      await expect(page.locator('.elements-panel .layer-item').filter({ hasText: 'Tapar' })).toHaveCount(0);
+    });
+
+    test('subir una imagen la añade como capa sobre el video', async ({ page }: { page: Page }) => {
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+
+      await page.locator('input[type="file"][accept="image/*"]').setInputFiles(FIXTURE_LOGO);
+
+      await expect(page.locator('.image-layer')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.track-label').filter({ hasText: 'Imagen' })).toBeVisible();
+      await expect(page.locator('.properties-panel .panel-title')).toHaveText('Imagen');
+    });
+
+    test('el recorte reduce la duración con la que trabaja el editor', async ({ page }: { page: Page }) => {
+      await page.goto(STUDIO_URL);
+      await uploadVideo(page);
+      await page.locator('.elements-panel .layer-item').filter({ hasText: 'Video Source' }).click();
+
+      const duration = page.locator('.trim-duration');
+      const full = await duration.textContent();
+
+      // Mover el extremo final acorta el trozo de material que se va a exportar.
+      const end = page.locator('.trim-range-end');
+      await end.evaluate((el: HTMLInputElement) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(el, String(Number(el.max) / 2));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      await expect(duration).not.toHaveText(full ?? '');
+      // "Usar todo" solo aparece cuando hay recorte activo.
+      await expect(page.locator('.prop-reset')).toBeVisible();
+
+      await page.locator('.prop-reset').click();
+      await expect(duration).toHaveText(full ?? '');
     });
   });
 });

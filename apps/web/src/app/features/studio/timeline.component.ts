@@ -1,11 +1,11 @@
 import { Component, computed, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import type { TextOverlay, BrandOverlay, AudioTrack } from '@social-downloader/contracts';
+import type { TextOverlay, BrandOverlay, AudioTrack, MaskLayer, ImageLayer } from '@social-downloader/contracts';
 
 interface TimelineTrack {
   id: string;
   label: string;
-  type: 'video' | 'text' | 'brand' | 'music' | 'sfx';
+  type: 'video' | 'text' | 'brand' | 'mask' | 'image' | 'music' | 'sfx';
   segments: TimelineSegment[];
   color: string;
 }
@@ -188,6 +188,8 @@ export class TimelineComponent {
   readonly textOverlays = input<TextOverlay[]>([]);
   readonly brandOverlays = input<BrandOverlay[]>([]);
   readonly audioTracks = input<AudioTrack[]>([]);
+  readonly masks = input<MaskLayer[]>([]);
+  readonly images = input<ImageLayer[]>([]);
 
   readonly seekTo = output<number>();
   readonly segmentUpdate = output<{ id: string; start: number; end: number }>();
@@ -199,6 +201,8 @@ export class TimelineComponent {
     const textOverlays = this.textOverlays();
     const brandOverlays = this.brandOverlays();
     const audioTracks = this.audioTracks();
+    const masks = this.masks();
+    const images = this.images();
 
     const result: TimelineTrack[] = [];
 
@@ -232,6 +236,33 @@ export class TimelineComponent {
           color: 'rgba(168, 85, 247, 0.6)',
         })),
         color: '#a855f7',
+      });
+    }
+
+    // Mask track
+    if (masks.length) {
+      result.push({
+        id: 'mask', label: 'Tapar', type: 'mask',
+        segments: masks.map((m) => ({
+          id: m.id,
+          label: m.mode === 'solid' ? 'Color' : m.mode === 'pixelate' ? 'Pixelado' : 'Desenfoque',
+          start: m.startTime, end: m.endTime,
+          color: 'rgba(148, 163, 184, 0.6)',
+        })),
+        color: '#94a3b8',
+      });
+    }
+
+    // Image track
+    if (images.length) {
+      result.push({
+        id: 'image', label: 'Imagen', type: 'image',
+        segments: images.map((i) => ({
+          id: i.id, label: i.fileName,
+          start: i.startTime, end: i.endTime,
+          color: 'rgba(20, 184, 166, 0.6)',
+        })),
+        color: '#14b8a6',
       });
     }
 

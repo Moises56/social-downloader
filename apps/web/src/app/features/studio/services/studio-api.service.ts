@@ -3,21 +3,22 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import type {
+  AudioTrack,
   BrandPresetsResponse,
-  TextPresetsResponse,
   CompositionPresetsResponse,
-  ExportPresetsResponse,
+  CreateCompositionRequest,
   CreateCompositionResponse,
   DuplicateCompositionResponse,
-  StartRenderResponse,
+  ExportPresetsResponse,
   RenderStatusResponse,
   SaveCompositionPresetResponse,
   SavedCompositionPresetsResponse,
-  ValidateCompositionResponse,
+  StartRenderResponse,
   TextOverlay,
-  AudioTrack,
-  VideoFitConfig,
+  TextPresetsResponse,
+  ValidateCompositionResponse,
   VideoComposition,
+  VideoFitConfig,
 } from '@social-downloader/contracts';
 
 @Injectable({ providedIn: 'root' })
@@ -50,17 +51,9 @@ export class StudioApiService {
     );
   }
 
-  createComposition(params: {
-    sourceAssetId: string;
-    brandPresetId?: string;
-    exportPresetId?: string;
-    videoFit?: VideoFitConfig;
-    textTracks?: TextOverlay[];
-    audioTracks?: AudioTrack[];
-    keepOriginalAudio?: boolean;
-    originalAudioVolume?: number;
-    brandCustomPosition?: { x: number; y: number };
-  }): Observable<CreateCompositionResponse> {
+  // Se usa el contrato compartido en vez de repetir la forma aquí: la copia local se
+  // quedaba desfasada en cuanto el backend aceptaba un campo nuevo.
+  createComposition(params: CreateCompositionRequest): Observable<CreateCompositionResponse> {
     return this.http.post<CreateCompositionResponse>(
       `${this.baseUrl}/compositions`,
       params,

@@ -10,6 +10,9 @@ import type {
   VideoFitMode,
   VideoFitConfig,
   ValidationWarning,
+  MaskLayer,
+  ImageLayer,
+  SourceTrim,
 } from '@social-downloader/contracts';
 import type { NormalizedPosition } from '../editor/position';
 
@@ -33,6 +36,9 @@ interface AutosaveData {
   videoFitBackgroundColor: string;
   textOverlays: TextOverlay[];
   audioTracks: AudioTrack[];
+  masks: MaskLayer[];
+  images: ImageLayer[];
+  sourceTrim: SourceTrim | null;
   keepOriginalAudio: boolean;
   originalAudioVolume: number;
   showSafeZones: boolean;
@@ -63,15 +69,42 @@ export class StudioStore {
   readonly videoFitMode = signal<VideoFitMode>('crop');
   readonly videoFitBackgroundColor = signal<string>('#000000');
   readonly validationWarnings = signal<ValidationWarning[]>([]);
+  readonly masks = signal<MaskLayer[]>([]);
+  readonly images = signal<ImageLayer[]>([]);
+  /** Recorte del material fuente. `null` = se usa entero. */
+  readonly sourceTrim = signal<SourceTrim | null>(null);
+  /**
+   * Vivían como señales de la página, así que el autosave los guardaba fijos a true/1.0
+   * y no sobrevivían a recargar. Aquí sí se persisten.
+   */
+  readonly keepOriginalAudio = signal<boolean>(true);
+  readonly originalAudioVolume = signal<number>(1.0);
 
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly hasSource = computed(() => this.sourceAsset() !== null);
   readonly canRender = computed(() => this.hasSource() && this.renderState() === 'idle');
 
+  /** Duración del material tal cual se subió. */
+  readonly sourceDuration = computed(() => this.sourceAsset()?.duration ?? 0);
+
+  /**
+   * Duración con la que trabaja el editor. Con recorte activo es la del trozo elegido,
+   * porque todo lo temporal (textos, máscaras, marca, audio) es relativo al recorte,
+   * igual que en el render.
+   */
   readonly totalDuration = computed(() => {
-    const asset = this.sourceAsset();
-    return asset?.duration ?? 0;
+    const trim = this.sourceTrim();
+    if (trim && trim.end > trim.start) return trim.end - trim.start;
+    return this.sourceDuration();
+  });
+
+  /** Desplazamiento a aplicar al <video> del preview para simular el recorte. */
+  readonly trimOffset = computed(() => this.sourceTrim()?.start ?? 0);
+
+  readonly isTrimmed = computed(() => {
+    const trim = this.sourceTrim();
+    return !!trim && (trim.start > 0 || trim.end < this.sourceDuration());
   });
 
   readonly watermarkMode = computed(() => {
@@ -190,6 +223,45 @@ export class StudioStore {
     );
   }
 
+  addMask(mask: MaskLayer): void {
+    this.masks.update((masks) => [...masks, mask]);
+  }
+
+  removeMask(id: string): void {
+    this.masks.update((masks) => masks.filter((m) => m.id !== id));
+  }
+
+  updateMask(id: string, updates: Partial<MaskLayer>): void {
+    this.masks.update((masks) => masks.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+  }
+
+  addImage(image: ImageLayer): void {
+    this.images.update((images) => [...images, image]);
+  }
+
+  removeImage(id: string): void {
+    this.images.update((images) => images.filter((i) => i.id !== id));
+  }
+
+  updateImage(id: string, updates: Partial<ImageLayer>): void {
+    this.images.update((images) => images.map((i) => (i.id === id ? { ...i, ...updates } : i)));
+  }
+
+  /**
+   * Ajusta el recorte manteniéndolo dentro del material y con un mínimo de medio segundo,
+   * para que no se pueda arrastrar un extremo por encima del otro.
+   */
+  setSourceTrim(trim: SourceTrim | null): void {
+    if (!trim) {
+      this.sourceTrim.set(null);
+      return;
+    }
+    const duration = this.sourceDuration();
+    const start = Math.max(0, Math.min(trim.start, Math.max(0, duration - 0.5)));
+    const end = Math.min(duration || trim.end, Math.max(start + 0.5, trim.end));
+    this.sourceTrim.set({ start, end });
+  }
+
   updateBrandOverlayPosition(position: NormalizedPosition): void {
     this.brandCustomPosition.set(position);
   }
@@ -249,8 +321,11 @@ export class StudioStore {
       videoFitBackgroundColor: this.videoFitBackgroundColor(),
       textOverlays: this.textOverlays(),
       audioTracks: this.audioTracks(),
-      keepOriginalAudio: true,
-      originalAudioVolume: 1.0,
+      masks: this.masks(),
+      images: this.images(),
+      sourceTrim: this.sourceTrim(),
+      keepOriginalAudio: this.keepOriginalAudio(),
+      originalAudioVolume: this.originalAudioVolume(),
       showSafeZones: this.showSafeZones(),
       brandCustomPosition: this.brandCustomPosition(),
       savedAt: Date.now(),
@@ -278,6 +353,12 @@ export class StudioStore {
 
       if (data.textOverlays.length) this.textOverlays.set(data.textOverlays);
       if (data.audioTracks.length) this.audioTracks.set(data.audioTracks);
+      // Guardados por versiones anteriores del autosave: pueden no existir.
+      if (data.masks?.length) this.masks.set(data.masks);
+      if (data.images?.length) this.images.set(data.images);
+      if (data.sourceTrim) this.sourceTrim.set(data.sourceTrim);
+      if (typeof data.keepOriginalAudio === 'boolean') this.keepOriginalAudio.set(data.keepOriginalAudio);
+      if (typeof data.originalAudioVolume === 'number') this.originalAudioVolume.set(data.originalAudioVolume);
       if (data.brandPresetId) this.brandPresetId.set(data.brandPresetId);
       this.videoFitMode.set(data.videoFitMode);
       this.videoFitBackgroundColor.set(data.videoFitBackgroundColor);
@@ -304,6 +385,9 @@ export class StudioStore {
     this.selectedPreset.set(null);
     this.textOverlays.set([]);
     this.audioTracks.set([]);
+    this.masks.set([]);
+    this.images.set([]);
+    this.sourceTrim.set(null);
     this.brandCustomPosition.set(null);
     this.composition.set(null);
     this.renderState.set('idle');

@@ -7,7 +7,7 @@ import { VideoPreviewComponent } from './video-preview.component';
 import { TimelineComponent } from './timeline.component';
 import { OverlayEditorComponent } from './overlay-editor.component';
 import { AudioPanelComponent } from './audio-panel.component';
-import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset, VideoFitMode } from '@social-downloader/contracts';
+import type { BrandPreset, TextPreset, CompositionPreset, TextOverlay, AudioTrack, SavedCompositionPreset, ExportPreset, VideoFitMode, MaskLayer } from '@social-downloader/contracts';
 import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
 
 @Component({
@@ -93,7 +93,34 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
                   <span class="layer-name">{{ store.selectedPreset() ? '@Ilusiones&Colores' : 'Marca' }}</span>
                 </div>
               }
-              @if (!store.sourceVideoUrl()) {
+              @for (mask of store.masks(); track mask.id) {
+                <div class="layer-item" [class.active]="selectedOverlayId() === mask.id" (click)="selectLayerById(mask.id)">
+                  <span class="layer-icon">&#9632;</span>
+                  <span class="layer-name">Tapar &middot; {{ maskModeLabel(mask.mode) }}</span>
+                  <button class="layer-remove" type="button" [attr.aria-label]="'Eliminar m&aacute;scara'" (click)="$event.stopPropagation(); removeMask(mask.id)">&times;</button>
+                </div>
+              }
+              @for (image of store.images(); track image.id) {
+                <div class="layer-item" [class.active]="selectedOverlayId() === image.id" (click)="selectLayerById(image.id)">
+                  <span class="layer-icon">&#9634;</span>
+                  <span class="layer-name">{{ image.fileName }}</span>
+                  <button class="layer-remove" type="button" [attr.aria-label]="'Eliminar imagen'" (click)="$event.stopPropagation(); removeImage(image.id)">&times;</button>
+                </div>
+              }
+
+              @if (store.sourceVideoUrl()) {
+                <div class="layer-actions">
+                  <button class="layer-add" type="button" (click)="addMask()">
+                    <span class="layer-add-icon">&#9632;</span>
+                    <span>Tapar logo</span>
+                  </button>
+                  <button class="layer-add" type="button" (click)="imageInput.click()">
+                    <span class="layer-add-icon">&#9634;</span>
+                    <span>A&ntilde;adir imagen</span>
+                  </button>
+                </div>
+                <input #imageInput type="file" accept="image/*" (change)="onImageSelected($event)" hidden>
+              } @else {
                 <div class="empty-hint">Sube un video para comenzar</div>
               }
             </div>
@@ -109,9 +136,15 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
                   [duration]="store.totalDuration()"
                   [showSafeZones]="store.showSafeZones()"
                   [selectedOverlayId]="selectedOverlayId()"
+                  [masks]="store.masks()"
+                  [images]="store.images()"
+                  [imageSources]="imageSources()"
+                  [trimOffset]="store.trimOffset()"
                   (timeChange)="store.currentTime.set($event)"
                   (overlaySelect)="onOverlaySelect($event)"
-                  (overlayPositionChange)="onOverlayPositionChange($event)">
+                  (overlayPositionChange)="onOverlayPositionChange($event)"
+                  (maskRectChange)="onMaskRectChange($event)"
+                  (imagePositionChange)="onImagePositionChange($event)">
                 </app-video-preview>
               } @else {
                 <div class="upload-zone" (click)="fileInput.click()" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
@@ -134,6 +167,8 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
                   [textOverlays]="store.textOverlays()"
                   [brandOverlays]="store.brandOverlays()"
                   [audioTracks]="store.audioTracks()"
+                  [masks]="store.masks()"
+                  [images]="store.images()"
                   (seekTo)="onSeekTimeline($event)"
                   (segmentUpdate)="onSegmentUpdate($event)">
                 </app-timeline>
@@ -176,6 +211,39 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
                   }
                 </div>
                 <div class="prop-section">
+                  <div class="prop-head">
+                    <h4 class="prop-label">Recorte</h4>
+                    @if (store.isTrimmed()) {
+                      <button class="prop-reset" type="button" (click)="resetTrim()">Usar todo</button>
+                    }
+                  </div>
+
+                  <div class="trim-track" role="group" aria-label="Recorte del video">
+                    <div class="trim-span" [style.left.%]="trimStartPercent()" [style.width.%]="trimWidthPercent()"></div>
+                    <input
+                      class="trim-range trim-range-start" type="range"
+                      [min]="0" [max]="store.sourceDuration()" step="0.1"
+                      [value]="trimStart()" (input)="onTrimStart(+$any($event.target).value)"
+                      aria-label="Inicio del recorte">
+                    <input
+                      class="trim-range trim-range-end" type="range"
+                      [min]="0" [max]="store.sourceDuration()" step="0.1"
+                      [value]="trimEnd()" (input)="onTrimEnd(+$any($event.target).value)"
+                      aria-label="Fin del recorte">
+                  </div>
+
+                  <div class="trim-readout">
+                    <span class="trim-time">{{ formatSeconds(trimStart()) }}</span>
+                    <span class="trim-duration">{{ formatSeconds(store.totalDuration()) }}</span>
+                    <span class="trim-time">{{ formatSeconds(trimEnd()) }}</span>
+                  </div>
+
+                  <div class="trim-actions">
+                    <button class="trim-btn" type="button" (click)="setTrimStartFromPlayhead()">Inicio aqu&iacute;</button>
+                    <button class="trim-btn" type="button" (click)="setTrimEndFromPlayhead()">Fin aqu&iacute;</button>
+                  </div>
+                </div>
+                <div class="prop-section">
                   <h4 class="prop-label">Audio original</h4>
                   <label class="check-label">
                     <input type="checkbox" [checked]="keepOriginalAudio()" (change)="keepOriginalAudio.set(!keepOriginalAudio())">
@@ -196,6 +264,105 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
                   (duplicate)="onOverlayDuplicate($event)"
                   (remove)="onOverlayRemove($event)">
                 </app-overlay-editor>
+              } @else if (selectedMask(); as mask) {
+                <div class="prop-section">
+                  <h4 class="prop-label">C&oacute;mo se tapa</h4>
+                  <div class="mode-row">
+                    @for (mode of maskModes; track mode.value) {
+                      <button
+                        class="mode-btn"
+                        type="button"
+                        [class.active]="mask.mode === mode.value"
+                        (click)="store.updateMask(mask.id, { mode: mode.value })">
+                        {{ mode.label }}
+                      </button>
+                    }
+                  </div>
+
+                  @if (mask.mode === 'solid') {
+                    <div class="color-row">
+                      <label class="color-label" [attr.for]="'mask-color-' + mask.id">Color</label>
+                      <input
+                        [id]="'mask-color-' + mask.id" type="color" class="color-input"
+                        [value]="mask.color ?? '#000000'"
+                        (input)="store.updateMask(mask.id, { color: $any($event.target).value })">
+                    </div>
+                  } @else {
+                    <div class="volume-row">
+                      <span class="volume-label">Intensidad</span>
+                      <input
+                        type="range" class="volume-slider" min="4" max="50" step="1"
+                        [value]="mask.intensity"
+                        (input)="store.updateMask(mask.id, { intensity: +$any($event.target).value })"
+                        aria-label="Intensidad">
+                      <span class="volume-value">{{ mask.intensity }}</span>
+                    </div>
+                  }
+                </div>
+
+                <div class="prop-section">
+                  <h4 class="prop-label">Cu&aacute;ndo</h4>
+                  <div class="timing-row">
+                    <label class="timing-field">
+                      <span class="timing-label">Inicio</span>
+                      <input type="number" class="timing-input" min="0" [max]="store.totalDuration()" step="0.1"
+                        [value]="mask.startTime"
+                        (change)="store.updateMask(mask.id, { startTime: +$any($event.target).value })">
+                    </label>
+                    <label class="timing-field">
+                      <span class="timing-label">Fin</span>
+                      <input type="number" class="timing-input" min="0" [max]="store.totalDuration()" step="0.1"
+                        [value]="mask.endTime"
+                        (change)="store.updateMask(mask.id, { endTime: +$any($event.target).value })">
+                    </label>
+                  </div>
+                  <p class="prop-hint">Arrastra el recuadro en el video para colocarlo, y las esquinas para ajustarlo.</p>
+                </div>
+
+                <button class="danger-btn" type="button" (click)="removeMask(mask.id)">Eliminar</button>
+
+              } @else if (selectedImage(); as image) {
+                <div class="prop-section">
+                  <h4 class="prop-label">{{ image.fileName }}</h4>
+                  <div class="volume-row">
+                    <span class="volume-label">Tama&ntilde;o</span>
+                    <input type="range" class="volume-slider" min="0.05" max="1" step="0.01"
+                      [value]="image.scale"
+                      (input)="store.updateImage(image.id, { scale: +$any($event.target).value })"
+                      aria-label="Tama&ntilde;o">
+                    <span class="volume-value">{{ (image.scale * 100) | number:'1.0-0' }}%</span>
+                  </div>
+                  <div class="volume-row">
+                    <span class="volume-label">Opacidad</span>
+                    <input type="range" class="volume-slider" min="0" max="1" step="0.05"
+                      [value]="image.opacity"
+                      (input)="store.updateImage(image.id, { opacity: +$any($event.target).value })"
+                      aria-label="Opacidad">
+                    <span class="volume-value">{{ (image.opacity * 100) | number:'1.0-0' }}%</span>
+                  </div>
+                </div>
+
+                <div class="prop-section">
+                  <h4 class="prop-label">Cu&aacute;ndo</h4>
+                  <div class="timing-row">
+                    <label class="timing-field">
+                      <span class="timing-label">Inicio</span>
+                      <input type="number" class="timing-input" min="0" [max]="store.totalDuration()" step="0.1"
+                        [value]="image.startTime"
+                        (change)="store.updateImage(image.id, { startTime: +$any($event.target).value })">
+                    </label>
+                    <label class="timing-field">
+                      <span class="timing-label">Fin</span>
+                      <input type="number" class="timing-input" min="0" [max]="store.totalDuration()" step="0.1"
+                        [value]="image.endTime"
+                        (change)="store.updateImage(image.id, { endTime: +$any($event.target).value })">
+                    </label>
+                  </div>
+                  <p class="prop-hint">Arrastra la imagen en el video para colocarla.</p>
+                </div>
+
+                <button class="danger-btn" type="button" (click)="removeImage(image.id)">Eliminar</button>
+
               } @else if (selectedLayerType() === 'brand') {
                 <div class="prop-section">
                   <h4 class="prop-label">Marca</h4>
@@ -654,6 +821,149 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     .volume-slider { flex: 1; accent-color: var(--color-accent); }
     .volume-value { font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; min-width: 32px; }
 
+    /* ── Añadir capas ─────────────────────────────────────────────────────── */
+    .layer-actions {
+      display: flex; flex-direction: column; gap: 4px;
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid var(--color-border-subtle);
+    }
+    .layer-add {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 6px;
+      background: none; border: 1px dashed var(--color-border);
+      color: var(--color-text-secondary);
+      font-size: 12px; text-align: left;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .layer-add:hover {
+      border-color: var(--color-accent);
+      border-style: solid;
+      color: var(--color-text-primary);
+      background: var(--color-bg);
+    }
+    .layer-add-icon {
+      width: 24px; height: 24px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; border-radius: 4px;
+      background: var(--color-bg); color: var(--color-text-muted);
+    }
+    .layer-add:hover .layer-add-icon { color: var(--color-accent); }
+
+    /* ── Cabecera de sección con acción secundaria ────────────────────────── */
+    .prop-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 8px; margin-bottom: 8px;
+    }
+    .prop-head .prop-label { margin-bottom: 0; }
+    .prop-reset {
+      background: none; border: none; padding: 0;
+      font-size: 10px; color: var(--color-accent);
+      cursor: pointer;
+    }
+    .prop-reset:hover { color: var(--color-accent-hover); text-decoration: underline; }
+
+    /* ── Recorte ──────────────────────────────────────────────────────────────
+       Dos ranges superpuestos sobre una misma pista. Los inputs no reciben puntero
+       salvo en sus pulgares, que es lo que permite agarrar cualquiera de los dos
+       extremos aunque se crucen visualmente. */
+    .trim-track {
+      position: relative; height: 28px; margin-top: 4px;
+      display: flex; align-items: center;
+    }
+    .trim-track::before {
+      content: ''; position: absolute; left: 0; right: 0; height: 4px;
+      background: var(--color-bg); border-radius: 2px;
+    }
+    .trim-span {
+      position: absolute; height: 4px;
+      top: 50%; transform: translateY(-50%);
+      background: var(--color-accent); border-radius: 2px;
+    }
+    .trim-range {
+      position: absolute; left: 0; width: 100%;
+      margin: 0; background: none; appearance: none;
+      pointer-events: none;
+    }
+    .trim-range::-webkit-slider-thumb {
+      appearance: none; pointer-events: auto;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--color-text-primary);
+      border: 2px solid var(--color-accent);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      cursor: ew-resize;
+    }
+    .trim-range::-moz-range-thumb {
+      pointer-events: auto;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--color-text-primary);
+      border: 2px solid var(--color-accent);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      cursor: ew-resize;
+    }
+    .trim-range::-moz-range-track { background: none; }
+
+    .trim-readout {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 8px; margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .trim-time { font-size: 11px; color: var(--color-text-muted); }
+    .trim-duration { font-size: 11px; font-weight: 600; color: var(--color-text-primary); }
+
+    .trim-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .trim-btn {
+      flex: 1; padding: 6px 8px;
+      font-size: 11px; color: var(--color-text-secondary);
+      background: var(--color-bg);
+      border: 1px solid var(--color-border); border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .trim-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+
+    /* ── Selector de modo ─────────────────────────────────────────────────── */
+    .mode-row { display: flex; gap: 4px; }
+    .mode-btn {
+      flex: 1; padding: 7px 6px;
+      font-size: 11px; font-weight: 500;
+      color: var(--color-text-secondary);
+      background: var(--color-bg);
+      border: 1px solid var(--color-border); border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .mode-btn:hover { border-color: var(--color-accent); }
+    .mode-btn.active {
+      border-color: var(--color-accent);
+      background: var(--color-accent-glow);
+      color: var(--color-text-primary);
+    }
+
+    /* ── Tiempos ──────────────────────────────────────────────────────────── */
+    .timing-row { display: flex; gap: 8px; }
+    .timing-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .timing-label { font-size: 10px; color: var(--color-text-muted); }
+    .timing-input {
+      width: 100%; padding: 6px 8px;
+      font-size: 12px; font-variant-numeric: tabular-nums;
+      color: var(--color-text-primary);
+      background: var(--color-bg);
+      border: 1px solid var(--color-border); border-radius: 6px;
+    }
+    .timing-input:focus { border-color: var(--color-accent); outline: none; }
+
+    .prop-hint {
+      margin: 8px 0 0; font-size: 11px; line-height: 1.5;
+      color: var(--color-text-secondary);
+    }
+
+    .danger-btn {
+      width: 100%; padding: 8px;
+      font-size: 12px; color: var(--color-danger);
+      background: var(--color-danger-bg);
+      border: 1px solid var(--color-danger-border); border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .danger-btn:hover { background: rgba(239, 68, 68, 0.16); }
+
     .export-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
     .export-btn {
       display: flex; flex-direction: column; gap: 2px;
@@ -762,8 +1072,10 @@ export class StudioPageComponent {
   readonly newText = signal('');
   readonly selectedTextPreset = signal<TextPreset | null>(null);
   readonly selectedOverlayId = signal<string | null>(null);
-  readonly keepOriginalAudio = signal(true);
-  readonly originalVolume = signal(1.0);
+  // Alias a las señales del store: antes eran locales, así que el autosave las guardaba
+  // fijas a true/1.0 y tus ajustes de audio no sobrevivían a recargar la página.
+  readonly keepOriginalAudio = this.store.keepOriginalAudio;
+  readonly originalVolume = this.store.originalAudioVolume;
   readonly autoDuck = signal(false);
   readonly showSavePreset = signal(false);
   readonly presetName = signal('');
@@ -788,7 +1100,45 @@ export class StudioPageComponent {
     if (this.selectedLayerType() === 'source') return 'Video Source';
     if (this.selectedLayerType() === 'brand') return 'Marca';
     if (this.selectedOverlay()) return 'Editar texto';
+    if (this.selectedMask()) return 'Tapar logo';
+    if (this.selectedImage()) return 'Imagen';
     return 'Propiedades';
+  });
+
+  readonly maskModes: Array<{ value: MaskLayer['mode']; label: string }> = [
+    { value: 'blur', label: 'Desenfoque' },
+    { value: 'pixelate', label: 'Pixelado' },
+    { value: 'solid', label: 'Color' },
+  ];
+
+  /**
+   * assetId -> object URL local. El fichero ya está en el navegador cuando se sube, así
+   * que la previsualización no necesita volver a pedirlo al servidor.
+   */
+  readonly imageSources = signal<Record<string, string>>({});
+
+  readonly selectedMask = computed(() => {
+    const id = this.selectedOverlayId();
+    return id ? this.store.masks().find((m) => m.id === id) ?? null : null;
+  });
+
+  readonly selectedImage = computed(() => {
+    const id = this.selectedOverlayId();
+    return id ? this.store.images().find((i) => i.id === id) ?? null : null;
+  });
+
+  // ── Recorte ────────────────────────────────────────────────────────────────
+  readonly trimStart = computed(() => this.store.sourceTrim()?.start ?? 0);
+  readonly trimEnd = computed(() => this.store.sourceTrim()?.end ?? this.store.sourceDuration());
+
+  readonly trimStartPercent = computed(() => {
+    const total = this.store.sourceDuration();
+    return total > 0 ? (this.trimStart() / total) * 100 : 0;
+  });
+
+  readonly trimWidthPercent = computed(() => {
+    const total = this.store.sourceDuration();
+    return total > 0 ? ((this.trimEnd() - this.trimStart()) / total) * 100 : 100;
   });
 
   readonly downloadUrl = computed(() => {
@@ -803,6 +1153,8 @@ export class StudioPageComponent {
     effect(() => {
       const _overlays = this.store.textOverlays();
       const _audio = this.store.audioTracks();
+      const _masks = this.store.masks();
+      const _images = this.store.images();
       const _duration = this.store.totalDuration();
       const _brand = this.store.selectedPreset();
 
@@ -853,6 +1205,119 @@ export class StudioPageComponent {
   selectLayer(type: 'source' | 'brand'): void {
     this.selectedOverlayId.set(null);
     this.selectedLayerType.set(type);
+  }
+
+  selectLayerById(id: string): void {
+    this.selectedLayerType.set(null);
+    this.selectedOverlayId.set(id);
+  }
+
+  maskModeLabel(mode: MaskLayer['mode']): string {
+    return this.maskModes.find((m) => m.value === mode)?.label ?? mode;
+  }
+
+  /**
+   * La máscara nace en el centro, visible durante todo el clip y con un tamaño cómodo de
+   * agarrar. Es un punto de partida para arrastrarla sobre el logo, no una apuesta sobre
+   * dónde está.
+   */
+  addMask(): void {
+    const id = crypto.randomUUID();
+    this.store.addMask({
+      id,
+      mode: 'blur',
+      intensity: 20,
+      rect: { x: 0.34, y: 0.42, width: 0.32, height: 0.16 },
+      startTime: 0,
+      endTime: this.store.totalDuration(),
+    });
+    this.selectLayerById(id);
+  }
+
+  removeMask(id: string): void {
+    this.store.removeMask(id);
+    if (this.selectedOverlayId() === id) this.selectedOverlayId.set(null);
+  }
+
+  removeImage(id: string): void {
+    const image = this.store.images().find((i) => i.id === id);
+    this.store.removeImage(id);
+    if (this.selectedOverlayId() === id) this.selectedOverlayId.set(null);
+
+    // Liberar el object URL si ya no lo usa ninguna otra capa.
+    if (image && !this.store.images().some((i) => i.assetId === image.assetId)) {
+      const sources = { ...this.imageSources() };
+      const url = sources[image.assetId];
+      if (url) {
+        URL.revokeObjectURL(url);
+        delete sources[image.assetId];
+        this.imageSources.set(sources);
+      }
+    }
+  }
+
+  onMaskRectChange(event: { id: string; rect: { x: number; y: number; width: number; height: number } }): void {
+    this.store.updateMask(event.id, { rect: event.rect });
+  }
+
+  onImagePositionChange(event: { id: string; position: { x: number; y: number } }): void {
+    this.store.updateImage(event.id, { position: event.position });
+  }
+
+  onImageSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    // Permite volver a elegir el mismo fichero: sin esto el change no vuelve a dispararse.
+    input.value = '';
+
+    const objectUrl = URL.createObjectURL(file);
+    this.api.uploadSource(file).subscribe({
+      next: (res) => {
+        this.imageSources.update((sources) => ({ ...sources, [res.asset.id]: objectUrl }));
+        const id = crypto.randomUUID();
+        this.store.addImage({
+          id,
+          assetId: res.asset.id,
+          fileName: res.asset.fileName,
+          position: { x: 0.5, y: 0.5 },
+          scale: 0.28,
+          opacity: 1,
+          startTime: 0,
+          endTime: this.store.totalDuration(),
+        });
+        this.selectLayerById(id);
+      },
+      error: () => URL.revokeObjectURL(objectUrl),
+    });
+  }
+
+  onTrimStart(value: number): void {
+    this.store.setSourceTrim({ start: value, end: this.trimEnd() });
+  }
+
+  onTrimEnd(value: number): void {
+    this.store.setSourceTrim({ start: this.trimStart(), end: value });
+  }
+
+  /** El playhead va en tiempo del recorte, así que se traslada a tiempo del material. */
+  setTrimStartFromPlayhead(): void {
+    this.onTrimStart(this.trimStart() + this.store.currentTime());
+  }
+
+  setTrimEndFromPlayhead(): void {
+    this.onTrimEnd(this.trimStart() + this.store.currentTime());
+  }
+
+  resetTrim(): void {
+    this.store.setSourceTrim(null);
+  }
+
+  formatSeconds(value: number): string {
+    const safe = Math.max(0, value);
+    const minutes = Math.floor(safe / 60);
+    const seconds = safe % 60;
+    return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`;
   }
 
   onOverlaySelect(overlayId: string | null): void {
@@ -950,6 +1415,9 @@ export class StudioPageComponent {
       videoFit: this.store.videoFit(),
       textTracks: this.store.textOverlays(),
       audioTracks: this.store.audioTracks(),
+      masks: this.store.masks(),
+      images: this.store.images(),
+      sourceTrim: this.store.sourceTrim() ?? undefined,
       keepOriginalAudio: this.keepOriginalAudio(),
       originalAudioVolume: this.originalVolume(),
       brandCustomPosition: this.store.brandCustomPosition() ?? undefined,
@@ -1033,7 +1501,24 @@ export class StudioPageComponent {
     this.store.currentTime.set(time);
   }
 
+  /**
+   * Antes esto llamaba siempre a `updateTextOverlay`, así que editar el Inicio/Fin de un
+   * segmento que no fuera de texto no hacía absolutamente nada: el `.map()` no encontraba
+   * el id y la interfaz aparentaba funcionar. Ahora se enruta según a qué capa pertenece.
+   */
   onSegmentUpdate(event: { id: string; start: number; end: number }): void {
+    if (this.store.masks().some((m) => m.id === event.id)) {
+      this.store.updateMask(event.id, { startTime: event.start, endTime: event.end });
+      return;
+    }
+    if (this.store.images().some((i) => i.id === event.id)) {
+      this.store.updateImage(event.id, { startTime: event.start, endTime: event.end });
+      return;
+    }
+    if (this.store.audioTracks().some((a) => a.id === event.id)) {
+      this.store.updateAudioTrack(event.id, { startTime: event.start });
+      return;
+    }
     this.store.updateTextOverlay(event.id, { startTime: event.start, endTime: event.end });
   }
 
@@ -1173,8 +1658,10 @@ export class StudioPageComponent {
       overlays: this.store.brandOverlays(),
       textTracks: this.store.textOverlays(),
       audioTracks: this.store.audioTracks(),
-      keepOriginalAudio: true,
-      originalAudioVolume: 1.0,
+      masks: this.store.masks(),
+      images: this.store.images(),
+      keepOriginalAudio: this.keepOriginalAudio(),
+      originalAudioVolume: this.originalVolume(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
