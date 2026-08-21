@@ -97,7 +97,8 @@ interface DragState {
                 [style]="getImageStyle(image)"
                 [title]="image.fileName + ' — se aplicará al renderizar'"
                 (pointerdown)="onImagePointerDown($event, image.id)">
-                <span class="placeholder-name">{{ image.fileName }}</span>
+                <span class="placeholder-mark" aria-hidden="true">&#9634;</span>
+                <span class="sr-only">{{ image.fileName }}</span>
               </div>
             }
           }
@@ -299,12 +300,17 @@ interface DragState {
       border-radius: 4px;
       background: rgba(10, 14, 26, 0.55);
     }
-    .placeholder-name {
-      font-size: 10px; line-height: 1.3; text-align: center;
-      color: #f1f5f9;
-      overflow: hidden; text-overflow: ellipsis;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    .placeholder-mark {
+      font-size: 14px; line-height: 1;
+      color: #f1f5f9; opacity: 0.85;
       pointer-events: none;
+    }
+    /* El nombre sigue estando para lectores de pantalla; visualmente no cabe en una capa
+       pequena y solo producia texto cortado. */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap; border: 0;
     }
 
     .safe-zone {

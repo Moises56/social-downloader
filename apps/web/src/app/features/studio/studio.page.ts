@@ -623,7 +623,13 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
 
     .workspace-grid {
       flex: 1; display: grid;
-      grid-template-columns: 220px 1fr 320px;
+      /* Anchos fluidos: con 220px/320px fijos los paneles no acompanaban al viewport y el
+         contenido se recortaba en cuanto la pantalla no era ancha. El minmax(0, 1fr) del
+         lienzo evita ademas que una pista larga de la timeline estire toda la rejilla. */
+      grid-template-columns:
+        clamp(200px, 15vw, 280px)
+        minmax(0, 1fr)
+        clamp(292px, 22vw, 380px);
       min-height: 0; overflow: hidden;
     }
 
@@ -656,7 +662,7 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     .panel-body::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
 
     .layer-item {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: flex-start; gap: 8px;
       padding: 8px 10px; border-radius: 6px;
       cursor: pointer; transition: all 0.15s;
       margin-bottom: 2px;
@@ -665,13 +671,20 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     .layer-item.active { background: var(--color-accent-glow); border: 1px solid var(--color-accent); }
     .layer-icon {
       width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      margin-top: 1px;
       font-size: 11px; font-weight: 700; color: var(--color-text-muted);
       background: var(--color-bg); border-radius: 4px; flex-shrink: 0;
     }
     .layer-item.active .layer-icon { background: var(--color-accent); color: #fff; }
     .layer-name {
-      flex: 1; font-size: 12px; color: var(--color-text-primary);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      /* min-width:0 es lo que permite encoger dentro del flex; sin el, la caja nunca baja
+         de su ancho de contenido. Se admiten dos lineas en vez de cortar en una: "Tapar ·
+         Desenfoque" y los nombres de fichero no caben en una sola a anchos de portatil. */
+      flex: 1; min-width: 0;
+      font-size: 12px; line-height: 1.35; color: var(--color-text-primary);
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
     .layer-remove {
       background: none; border: none; color: var(--color-text-muted);
@@ -810,7 +823,7 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     .fit-icon { width: 20px; height: 20px; color: var(--color-text-secondary); }
     .fit-btn.active .fit-icon { color: var(--color-accent); }
     .fit-label { font-size: 10px; font-weight: 600; color: var(--color-text-primary); }
-    .fit-sub { font-size: 8px; color: var(--color-text-muted); }
+    .fit-sub { font-size: 10px; line-height: 1.3; color: var(--color-text-muted); text-align: center; }
 
     .color-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
     .color-label { font-size: 11px; color: var(--color-text-secondary); }
@@ -1034,14 +1047,46 @@ import { POSITION_PRESETS, type NormalizedPosition } from './editor/position';
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    @media (max-width: 1024px) {
-      .workspace-grid { grid-template-columns: 1fr; }
-      .elements-panel, .properties-panel { display: none; }
+    /* Por debajo de tres columnas el editor NO pierde sus paneles: se reorganizan bajo el
+       lienzo. Antes se ocultaban con display:none, y con ellos desaparecían los botones de
+       añadir capa, el editor de textos y el recorte — es decir, no se podía editar nada. */
+    @media (max-width: 1100px) {
+      .workspace-grid {
+        grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) minmax(190px, 32vh);
+      }
+      .canvas-area { grid-column: 1 / -1; grid-row: 1; }
+      .elements-panel {
+        grid-column: 1; grid-row: 2;
+        border-top: 1px solid var(--color-border-subtle);
+      }
+      .properties-panel {
+        grid-column: 2; grid-row: 2;
+        border-left: 1px solid var(--color-border-subtle);
+        border-top: 1px solid var(--color-border-subtle);
+      }
       .topbar-center { display: none; }
     }
 
-    @media (min-width: 1025px) and (max-width: 1280px) {
-      .workspace-grid { grid-template-columns: 180px 1fr 280px; }
+    /* Móvil: una sola columna y el conjunto pasa a desplazarse, en vez de recortarse
+       contra el alto de la ventana. */
+    @media (max-width: 720px) {
+      :host { height: auto; min-height: 100vh; overflow: visible; }
+      .studio { height: auto; min-height: 100vh; }
+      .studio-workspace { overflow: visible; }
+      .workspace-grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto auto;
+        overflow: visible;
+      }
+      .canvas-area { grid-column: 1; grid-row: 1; height: 78vh; }
+      .elements-panel { grid-column: 1; grid-row: 2; border-right: none; }
+      .properties-panel { grid-column: 1; grid-row: 3; border-left: none; }
+      .elements-panel, .properties-panel {
+        border-top: 1px solid var(--color-border-subtle);
+        max-height: none;
+      }
+      .panel-body { overflow-y: visible; }
     }
 
     .modal-backdrop {

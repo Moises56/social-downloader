@@ -425,4 +425,49 @@ test.describe('Studio', () => {
       await expect(duration).toHaveText(full ?? '');
     });
   });
+
+  test.describe('Adaptación a distintos anchos', () => {
+    /**
+     * Busca texto realmente recortado: contenido que no cabe en su caja. Es la unica forma
+     * fiable de detectarlo, porque un `text-overflow: ellipsis` no falla, simplemente
+     * esconde parte del texto y la interfaz aparenta estar bien.
+     */
+    const clippedText = (page: Page) => page.evaluate(() => {
+      const out: string[] = [];
+      for (const el of Array.from(document.querySelectorAll('.studio-workspace *'))) {
+        if (el.children.length > 0) continue;
+        if (el.classList.contains('sr-only')) continue;
+        const text = (el.textContent || '').trim();
+        if (!text) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1) {
+          out.push(`${el.className}: "${text.slice(0, 40)}"`);
+        }
+      }
+      return out;
+    });
+
+    for (const width of [1920, 1440, 1280, 1024, 900]) {
+      test(`a ${width}px no se corta ningún texto y el editor sigue completo`, async ({ page }: { page: Page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(STUDIO_URL);
+        await uploadVideo(page);
+        await page.locator('.layer-add').filter({ hasText: 'Tapar logo' }).click();
+
+        expect(await clippedText(page)).toEqual([]);
+
+        // El editor se reorganiza al estrecharse, pero nunca pierde piezas: antes los dos
+        // paneles se ocultaban con display:none por debajo de 1024px y no quedaba forma
+        // de añadir capas, editar textos ni recortar.
+        await expect(page.locator('.elements-panel')).toBeVisible();
+        await expect(page.locator('.properties-panel')).toBeVisible();
+        await expect(page.locator('.layer-add')).toHaveCount(2);
+
+        // Y la página nunca se desplaza en horizontal.
+        const overflows = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+        expect(overflows).toBe(false);
+      });
+    }
+  });
 });
