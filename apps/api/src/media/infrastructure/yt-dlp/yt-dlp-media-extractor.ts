@@ -46,6 +46,27 @@ export class YtDlpMediaExtractor {
       args.push('--impersonate', impersonate);
     }
 
+    /**
+     * TikTok limita por IP de forma agresiva: desde una única conexión doméstica bastan
+     * unas diez peticiones para quedarse fuera durante un buen rato. Los servicios web que
+     * sí descargan TikTok de forma sostenida no usan una técnica distinta, usan MUCHAS IPs.
+     * Este es el interruptor para hacer lo mismo cuando haga falta volumen.
+     */
+    const proxy = process.env.YTDLP_PROXY?.trim();
+    if (proxy) {
+      args.push('--proxy', proxy);
+    }
+
+    /**
+     * Ruta de extracción alternativa: la API de la app móvil en vez de la página web.
+     * Es la que devuelve el vídeo sin marca de agua, y no comparte los límites del scraping
+     * web. Ejemplo: "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com".
+     */
+    const extractorArgs = process.env.YTDLP_EXTRACTOR_ARGS?.trim();
+    if (extractorArgs) {
+      args.push('--extractor-args', extractorArgs);
+    }
+
     return args;
   }
 
