@@ -28,6 +28,8 @@ const DOWNLOADER_ERROR_COPY: Record<string, string> = {
   AUTH_REQUIRED: 'Este contenido requiere iniciar sesión en la red social.',
   GEO_RESTRICTED: 'No disponible en tu región.',
   YTDLP_NOT_AVAILABLE: 'Servicio no disponible temporalmente. Inténtalo en un momento.',
+  PLATFORM_BLOCKED: 'La red social bloqueó la descarga. Suele resolverse iniciando sesión en el navegador y configurando las cookies del servidor.',
+  TOO_MANY_REQUESTS: 'Demasiadas solicitudes seguidas. Espera un momento y reinténtalo.',
   ANALYSIS_TIMEOUT: 'El análisis tardó demasiado. Prueba con otra URL.',
   DOWNLOAD_TIMEOUT: 'La descarga tardó demasiado. Inténtalo de nuevo.',
   INVALID_DOWNLOAD_TOKEN: 'El enlace de descarga expiró. Vuelve a intentarlo.',

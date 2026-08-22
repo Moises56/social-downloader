@@ -1,31 +1,14 @@
-export type ApiErrorCode =
-  | 'INVALID_URL'
-  | 'UNSUPPORTED_PLATFORM'
-  | 'MEDIA_NOT_AVAILABLE'
-  | 'PRIVATE_MEDIA'
-  | 'AUTH_REQUIRED'
-  | 'GEO_RESTRICTED'
-  | 'FORMAT_NOT_AVAILABLE'
-  | 'DOWNLOAD_TOO_LARGE'
-  | 'ANALYSIS_TIMEOUT'
-  | 'DOWNLOAD_TIMEOUT'
-  | 'DOWNLOAD_FAILED'
-  | 'DOWNLOAD_CANCELLED'
-  | 'YTDLP_NOT_AVAILABLE'
-  | 'SSRF_BLOCKED'
-  | 'INVALID_DOWNLOAD_TOKEN'
-  | 'TOO_MANY_REQUESTS'
-  | 'STUDIO_ASSET_NOT_FOUND'
-  | 'STUDIO_ASSET_TOO_LARGE'
-  | 'STUDIO_INVALID_COMPOSITION'
-  | 'STUDIO_RENDER_FAILED'
-  | 'STUDIO_RENDER_TIMEOUT'
-  | 'STUDIO_RENDER_CANCELLED'
-  | 'STUDIO_FFMPEG_NOT_AVAILABLE'
-  | 'STUDIO_UNSUPPORTED_FORMAT'
-  | 'STUDIO_INVALID_SOURCE'
-  | 'STUDIO_COMPOSITION_NOT_FOUND'
-  | 'STUDIO_RENDER_NOT_FOUND';
+import type {
+  ApiErrorCode as MediaErrorCode,
+  StudioErrorCode,
+} from '@social-downloader/contracts';
+
+/**
+ * Se deriva del contrato compartido en vez de repetir la unión aquí.
+ * La copia local se quedaba desfasada en silencio: añadir un código en `contracts` no
+ * llegaba al backend, y el compilador solo se quejaba en el punto de uso.
+ */
+export type ApiErrorCode = MediaErrorCode | StudioErrorCode;
 
 export const ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   INVALID_URL: 'La URL no es válida.',
@@ -41,6 +24,7 @@ export const ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   DOWNLOAD_FAILED: 'No se pudo completar la descarga.',
   DOWNLOAD_CANCELLED: 'La descarga fue cancelada.',
   YTDLP_NOT_AVAILABLE: 'El servicio de descarga no está disponible.',
+  PLATFORM_BLOCKED: 'La plataforma bloqueó la descarga. Requiere iniciar sesión en el navegador o habilitar impersonation.',
   SSRF_BLOCKED: 'La URL apunta a un recurso restringido.',
   INVALID_DOWNLOAD_TOKEN: 'El enlace de descarga expiró o no es válido.',
   TOO_MANY_REQUESTS: 'Demasiadas solicitudes. Espera un momento.',

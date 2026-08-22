@@ -64,4 +64,33 @@ describe('mapYtDlpError', () => {
   it('matches patterns case-insensitively', () => {
     expect(mapYtDlpError('ERROR: VIDEO UNAVAILABLE')).toBe('MEDIA_NOT_AVAILABLE');
   });
+
+  // Salidas reales de yt-dlp con TikTok. Antes caían todas en DOWNLOAD_FAILED, que se
+  // traduce a "No se pudo completar la descarga" y no dice qué hacer.
+  it('mapea el aviso de impersonation a PLATFORM_BLOCKED', () => {
+    expect(mapYtDlpError(
+      'WARNING: [TikTok] The extractor is attempting impersonation, but no impersonate target is available.',
+    )).toBe('PLATFORM_BLOCKED');
+  });
+
+  it('mapea el fallo de rehidratación de TikTok a PLATFORM_BLOCKED', () => {
+    expect(mapYtDlpError(
+      'ERROR: [TikTok] 7000000000000000000: Unable to extract universal data for rehydration',
+    )).toBe('PLATFORM_BLOCKED');
+  });
+
+  it('mapea el bot check a PLATFORM_BLOCKED', () => {
+    expect(mapYtDlpError(
+      'ERROR: Sign in to confirm you are not a bot',
+    )).toBe('PLATFORM_BLOCKED');
+  });
+
+  it('mapea el 429 a TOO_MANY_REQUESTS', () => {
+    expect(mapYtDlpError('ERROR: unable to download video data: HTTP Error 429: Too Many Requests'))
+      .toBe('TOO_MANY_REQUESTS');
+  });
+
+  it('sigue devolviendo DOWNLOAD_FAILED para lo que no reconoce', () => {
+    expect(mapYtDlpError('ERROR: something entirely unexpected happened')).toBe('DOWNLOAD_FAILED');
+  });
 });

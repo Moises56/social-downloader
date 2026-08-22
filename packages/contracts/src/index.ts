@@ -70,6 +70,8 @@ export type ApiErrorCode =
   | 'DOWNLOAD_FAILED'
   | 'DOWNLOAD_CANCELLED'
   | 'YTDLP_NOT_AVAILABLE'
+  /** La plataforma rechaza al cliente: hacen falta cookies de sesión o impersonation. */
+  | 'PLATFORM_BLOCKED'
   | 'SSRF_BLOCKED'
   | 'INVALID_DOWNLOAD_TOKEN'
   | 'TOO_MANY_REQUESTS';

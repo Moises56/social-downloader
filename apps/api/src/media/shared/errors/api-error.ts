@@ -32,6 +32,7 @@ export class ApiError extends HttpException {
       case 'AUTH_REQUIRED':
       case 'GEO_RESTRICTED':
       case 'SSRF_BLOCKED':
+      case 'PLATFORM_BLOCKED': // la plataforma nos rechaza: un 403 aguas arriba, no un fallo nuestro
         return 403;
       case 'MEDIA_NOT_AVAILABLE':
       case 'STUDIO_ASSET_NOT_FOUND':

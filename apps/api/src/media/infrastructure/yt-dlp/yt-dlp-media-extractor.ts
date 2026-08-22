@@ -21,9 +21,37 @@ export class YtDlpMediaExtractor {
     this.commandCandidates = this.resolveCandidates();
   }
 
+  /**
+   * Argumentos que deciden CÓMO se presenta yt-dlp ante la plataforma. Van tanto en el
+   * análisis como en la descarga: si solo fueran en uno de los dos, un vídeo se analizaría
+   * bien y luego fallaría al descargarlo, que es el peor modo de fallo posible.
+   *
+   * - `--cookies-from-browser`: Instagram, Facebook y TikTok devuelven poco o nada sin una
+   *   sesión. La variable YTDLP_COOKIES_FROM_BROWSER ya existía en .env pero no se leía en
+   *   ninguna parte, así que prometía algo que no ocurría.
+   * - `--impersonate`: TikTok exige que el cliente se haga pasar por un navegador real.
+   *   Requiere curl_cffi instalado junto a yt-dlp; sin él no hay ningún objetivo disponible
+   *   y la descarga falla.
+   */
+  private clientArgs(): string[] {
+    const args: string[] = [];
+
+    const cookiesFrom = process.env.YTDLP_COOKIES_FROM_BROWSER?.trim();
+    if (cookiesFrom) {
+      args.push('--cookies-from-browser', cookiesFrom);
+    }
+
+    const impersonate = process.env.YTDLP_IMPERSONATE?.trim();
+    if (impersonate) {
+      args.push('--impersonate', impersonate);
+    }
+
+    return args;
+  }
+
   async analyze(url: URL, signal?: AbortSignal): Promise<MediaMetadata> {
     const safe = await ensurePublicUrl(url.href);
-    const args = ['--dump-single-json', '--skip-download', '--no-playlist', safe.href];
+    const args = ['--dump-single-json', '--skip-download', '--no-playlist', ...this.clientArgs(), safe.href];
     const stdout = await this.runYtDlp(args, Number(process.env.ANALYSIS_TIMEOUT_MS ?? 30000), 'analysis', signal);
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
 
@@ -44,7 +72,7 @@ export class YtDlpMediaExtractor {
     await mkdir(baseDir, { recursive: true });
 
     const outputTemplate = join(baseDir, '%(title).180B-%(id)s.%(ext)s');
-    const args = ['--no-playlist', '--restrict-filenames', '-o', outputTemplate];
+    const args = ['--no-playlist', '--restrict-filenames', '-o', outputTemplate, ...this.clientArgs()];
 
     if (request.type === 'audio') {
       const audioFormat = request.audioFormat ?? 'mp3';
