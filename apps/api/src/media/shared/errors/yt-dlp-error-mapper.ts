@@ -17,6 +17,9 @@ const YTDLP_PATTERNS: YtDlpPattern[] = [
   { pattern: /confirm you'?re not a bot|confirm you are not a bot|not a robot|captcha/i, code: 'PLATFORM_BLOCKED' },
   { pattern: /impersonat/i, code: 'PLATFORM_BLOCKED' },
   { pattern: /unable to extract universal data/i, code: 'PLATFORM_BLOCKED' },
+  // Lo que TikTok devuelve cuando limita la IP o rechaza el reto JS. Es el mensaje que se
+  // veia en produccion, y no lo cubria ningun patron: acababa en DOWNLOAD_FAILED.
+  { pattern: /unexpected response from webpage/i, code: 'PLATFORM_BLOCKED' },
   { pattern: /unable to extract (?:webpage|initial state|sigi state|data)/i, code: 'PLATFORM_BLOCKED' },
   { pattern: /HTTP Error 429/i, code: 'TOO_MANY_REQUESTS' },
   { pattern: /rate.?limit/i, code: 'TOO_MANY_REQUESTS' },

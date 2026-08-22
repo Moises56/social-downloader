@@ -90,6 +90,13 @@ describe('mapYtDlpError', () => {
       .toBe('TOO_MANY_REQUESTS');
   });
 
+  it('mapea el rechazo de TikTok a PLATFORM_BLOCKED (caso real de produccion)', () => {
+    expect(mapYtDlpError(
+      'ERROR: [TikTok] 7670337720786586900: Unexpected response from webpage request; ' +
+      'please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q=',
+    )).toBe('PLATFORM_BLOCKED');
+  });
+
   it('sigue devolviendo DOWNLOAD_FAILED para lo que no reconoce', () => {
     expect(mapYtDlpError('ERROR: something entirely unexpected happened')).toBe('DOWNLOAD_FAILED');
   });
