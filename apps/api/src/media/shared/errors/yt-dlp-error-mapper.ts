@@ -25,18 +25,32 @@ const YTDLP_PATTERNS: YtDlpPattern[] = [
   { pattern: /rate.?limit/i, code: 'TOO_MANY_REQUESTS' },
 
   // ── Estado del contenido ──
+  /**
+   * X/Twitter. El mensaje es ambiguo a proposito: yt-dlp lo lanza tanto cuando el tweet
+   * no lleva video como cuando X se lo oculta a un visitante sin sesion (devuelve un
+   * TweetTombstone). Desde stderr no se pueden distinguir, asi que el mensaje cubre ambos.
+   */
+  { pattern: /no video could be found in this tweet|there'?s no video in this tweet/i, code: 'NO_VIDEO_FOUND' },
+  { pattern: /no video formats? found|no media found/i, code: 'NO_VIDEO_FOUND' },
+  { pattern: /nsfw tweet requires authentication|requires authentication/i, code: 'AUTH_REQUIRED' },
+  { pattern: /age.?restricted/i, code: 'AUTH_REQUIRED' },
   { pattern: /Video unavailable/i, code: 'MEDIA_NOT_AVAILABLE' },
+  { pattern: /tweet is unavailable|post is unavailable/i, code: 'MEDIA_NOT_AVAILABLE' },
   { pattern: /This video is private/i, code: 'PRIVATE_MEDIA' },
   { pattern: /Private video/i, code: 'PRIVATE_MEDIA' },
+  { pattern: /account is private|private account/i, code: 'PRIVATE_MEDIA' },
   { pattern: /not available in your country/i, code: 'GEO_RESTRICTED' },
   { pattern: /geo.?restrict/i, code: 'GEO_RESTRICTED' },
   { pattern: /requested format is not available/i, code: 'FORMAT_NOT_AVAILABLE' },
   { pattern: /format not available/i, code: 'FORMAT_NOT_AVAILABLE' },
-  { pattern: /no video formats found/i, code: 'MEDIA_NOT_AVAILABLE' },
 
   // ── Sesión ──
   { pattern: /sign in/i, code: 'AUTH_REQUIRED' },
   { pattern: /login required/i, code: 'AUTH_REQUIRED' },
+
+  // ── URL que yt-dlp no sabe manejar ──
+  { pattern: /unsupported url/i, code: 'UNSUPPORTED_PLATFORM' },
+  { pattern: /is not a valid url/i, code: 'INVALID_URL' },
 
   // ── Genéricos, al final ──
   { pattern: /HTTP Error 403/i, code: 'MEDIA_NOT_AVAILABLE' },

@@ -60,6 +60,8 @@ export type ApiErrorCode =
   | 'INVALID_URL'
   | 'UNSUPPORTED_PLATFORM'
   | 'MEDIA_NOT_AVAILABLE'
+  /** La publicacion existe pero no expone video: o no lo tiene, o no es visible sin sesion. */
+  | 'NO_VIDEO_FOUND'
   | 'PRIVATE_MEDIA'
   | 'AUTH_REQUIRED'
   | 'GEO_RESTRICTED'

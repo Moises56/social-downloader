@@ -33,8 +33,10 @@ describe('mapYtDlpError', () => {
     expect(mapYtDlpError('ERROR: requested format is not available')).toBe('FORMAT_NOT_AVAILABLE');
   });
 
-  it('maps no video formats to MEDIA_NOT_AVAILABLE', () => {
-    expect(mapYtDlpError('ERROR: no video formats found')).toBe('MEDIA_NOT_AVAILABLE');
+  // Antes caia en MEDIA_NOT_AVAILABLE ("el contenido no esta disponible"), que confunde:
+  // la publicacion SI existe, lo que no hay es un video descargable en ella.
+  it('maps no video formats to NO_VIDEO_FOUND', () => {
+    expect(mapYtDlpError('ERROR: no video formats found')).toBe('NO_VIDEO_FOUND');
   });
 
   it('maps unable to download to DOWNLOAD_FAILED', () => {
@@ -95,6 +97,36 @@ describe('mapYtDlpError', () => {
       'ERROR: [TikTok] 7670337720786586900: Unexpected response from webpage request; ' +
       'please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q=',
     )).toBe('PLATFORM_BLOCKED');
+  });
+
+  // Salida real de yt-dlp con la URL de X que fallaba: el tweet existe (es de hace dos
+  // dias) pero X se lo oculta a quien no ha iniciado sesion, y devuelve un TweetTombstone.
+  it('mapea el tweet sin video a NO_VIDEO_FOUND (caso real de produccion)', () => {
+    expect(mapYtDlpError(
+      'ERROR: [twitter] 2091270715047633270: No video could be found in this tweet',
+    )).toBe('NO_VIDEO_FOUND');
+  });
+
+  it('mapea el tweet NSFW a AUTH_REQUIRED', () => {
+    expect(mapYtDlpError(
+      'ERROR: [twitter] 1234: NSFW tweet requires authentication. Use --cookies',
+    )).toBe('AUTH_REQUIRED');
+  });
+
+  it('mapea una cuenta privada a PRIVATE_MEDIA', () => {
+    expect(mapYtDlpError('ERROR: [instagram] 1234: This account is private')).toBe('PRIVATE_MEDIA');
+  });
+
+  it('mapea una URL que yt-dlp no soporta a UNSUPPORTED_PLATFORM', () => {
+    expect(mapYtDlpError('ERROR: Unsupported URL: https://ejemplo.com/algo')).toBe('UNSUPPORTED_PLATFORM');
+  });
+
+  // Regresion de orden: `unable to download JSON metadata` aparece junto al 404 y, si el
+  // generico va primero, un tweet borrado se reporta como DOWNLOAD_FAILED.
+  it('prefiere el 404 sobre el generico de descarga', () => {
+    expect(mapYtDlpError(
+      'ERROR: [twitter] 1234: Unable to download JSON metadata: HTTP Error 404: Not Found',
+    )).toBe('MEDIA_NOT_AVAILABLE');
   });
 
   it('sigue devolviendo DOWNLOAD_FAILED para lo que no reconoce', () => {

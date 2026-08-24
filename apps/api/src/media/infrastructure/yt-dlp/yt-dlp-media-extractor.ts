@@ -36,8 +36,20 @@ export class YtDlpMediaExtractor {
   private clientArgs(): string[] {
     const args: string[] = [];
 
+    /**
+     * Un fichero de cookies exportado gana sobre leerlas del navegador, y no por gusto:
+     * en macOS `--cookies-from-browser chrome` tiene que descifrar la base de datos con la
+     * clave "Chrome Safe Storage" del llavero, y eso abre un diálogo. Un proceso servidor
+     * no tiene a nadie que lo conteste, así que el llavero deniega y yt-dlp continúa con
+     * CERO cookies ("cannot decrypt v10 cookies: no key found") — sólo un warning, y la
+     * descarga falla luego por un motivo que no tiene nada que ver. Con el fichero se
+     * paga ese diálogo una vez, a mano, y el servidor ya no depende del llavero.
+     */
+    const cookiesFile = process.env.YTDLP_COOKIES_FILE?.trim();
     const cookiesFrom = process.env.YTDLP_COOKIES_FROM_BROWSER?.trim();
-    if (cookiesFrom) {
+    if (cookiesFile) {
+      args.push('--cookies', cookiesFile);
+    } else if (cookiesFrom) {
       args.push('--cookies-from-browser', cookiesFrom);
     }
 

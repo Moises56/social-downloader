@@ -14,6 +14,7 @@ export const ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   INVALID_URL: 'La URL no es válida.',
   UNSUPPORTED_PLATFORM: 'Esta plataforma no es compatible.',
   MEDIA_NOT_AVAILABLE: 'El contenido no está disponible.',
+  NO_VIDEO_FOUND: 'La publicación no tiene un video descargable, o no es visible sin iniciar sesión.',
   PRIVATE_MEDIA: 'Este contenido es privado.',
   AUTH_REQUIRED: 'Se requiere iniciar sesión para acceder.',
   GEO_RESTRICTED: 'Este contenido no está disponible en tu región.',

@@ -35,6 +35,7 @@ export class ApiError extends HttpException {
       case 'PLATFORM_BLOCKED': // la plataforma nos rechaza: un 403 aguas arriba, no un fallo nuestro
         return 403;
       case 'MEDIA_NOT_AVAILABLE':
+      case 'NO_VIDEO_FOUND':
       case 'STUDIO_ASSET_NOT_FOUND':
       case 'STUDIO_COMPOSITION_NOT_FOUND':
       case 'STUDIO_RENDER_NOT_FOUND':
