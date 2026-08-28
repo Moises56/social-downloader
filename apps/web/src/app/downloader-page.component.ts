@@ -25,7 +25,7 @@ class ApiFetchError extends Error {
 const DOWNLOADER_ERROR_COPY: Record<string, string> = {
   UNSUPPORTED_PLATFORM: 'Esta plataforma no es compatible aún.',
   INVALID_URL: 'La URL no parece válida. Verifica que sea correcta.',
-  AUTH_REQUIRED: 'Este contenido requiere una sesión iniciada en la red social. Configura las cookies en el servidor.',
+  AUTH_REQUIRED: 'Este contenido pide sesión iniciada. El servidor no usa la sesión de tu navegador: hay que darle tus cookies.',
   NO_VIDEO_FOUND: 'No hay video descargable en esa publicación. Si es de X, suele significar que no se ve sin iniciar sesión: configura las cookies en el servidor.',
   MEDIA_NOT_AVAILABLE: 'El contenido ya no está disponible o fue eliminado.',
   PRIVATE_MEDIA: 'Es una cuenta o publicación privada.',

@@ -79,6 +79,25 @@ export class YtDlpMediaExtractor {
       args.push('--extractor-args', extractorArgs);
     }
 
+    /**
+     * YouTube firma las URLs de sus formatos con un reto JS. Sin resolverlo, yt-dlp avisa
+     * ("Signature solving failed", "n challenge solving failed") y sigue adelante con lo que
+     * puede. Medido en este repo sobre un vídeo público: la lista de formatos y la velocidad
+     * salen IGUAL con solver y sin él, así que esto no arregla por sí solo una descarga que
+     * falla — pero es lo que yt-dlp recomienda, y es lo que cubre los vídeos en los que la
+     * firma sí condiciona los formatos. Su efecto seguro es callar los warnings, que ademas
+     * eran los que tapaban la linea ERROR en el log.
+     * El solver es un componente que yt-dlp descarga aparte y sólo si se le pide.
+     * Requiere un runtime de JS en el sistema (Deno, o Node con `ejs:npm`).
+     * No se activa por defecto a propósito: `--remote-components` es una opción reciente y
+     * un yt-dlp viejo aborta con "no such option", que rompería TODAS las descargas en vez
+     * de degradar sólo YouTube. Va explícito en .env, que es donde ya se fija la versión.
+     */
+    const remoteComponents = process.env.YTDLP_REMOTE_COMPONENTS?.trim();
+    if (remoteComponents) {
+      args.push('--remote-components', remoteComponents);
+    }
+
     return args;
   }
 
@@ -265,8 +284,11 @@ export class YtDlpMediaExtractor {
             resolve(stdout);
             return;
           }
-          console.error(`[YtDlp] exited with code ${code}. stderr:`, stderr.slice(0, 500));
-          safeReject(new ApiError(mapYtDlpError(stderr)));
+          const mapped = mapYtDlpError(stderr);
+          console.error(
+            `[YtDlp] ${operation} falló (exit ${code}) → ${mapped}\n${relevantStderr(stderr)}`,
+          );
+          safeReject(new ApiError(mapped));
         });
       };
 
@@ -289,4 +311,18 @@ export class YtDlpMediaExtractor {
 
     return candidates;
   }
+}
+
+/**
+ * Los primeros 500 caracteres de stderr son casi siempre warnings — los de YouTube sobre el
+ * solver de retos JS pasan de 400 cada uno — así que el log truncado desde el principio no
+ * llegaba a mostrar nunca la línea ERROR, que es la única que dice qué pasó. Se prefieren
+ * las líneas ERROR y, si no hay ninguna, la COLA de stderr en vez de la cabeza.
+ */
+export function relevantStderr(stderr: string): string {
+  const errorLines = stderr
+    .split('\n')
+    .filter((line) => /^\s*ERROR:/.test(line));
+  if (errorLines.length > 0) return errorLines.join('\n').slice(0, 1000);
+  return stderr.slice(-500).trimStart();
 }

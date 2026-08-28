@@ -215,3 +215,28 @@ describe('YtDlpMediaExtractor', () => {
     }
   });
 });
+
+describe('relevantStderr', () => {
+  // Caso real: los warnings de YouTube sobre el solver de retos JS pasan de 400 caracteres
+  // cada uno, asi que el log truncado a los primeros 500 no llegaba nunca a la linea ERROR.
+  const youtubeStderr = [
+    'WARNING: [youtube] [jsc] Remote components challenge solver script (deno) and NPM package (deno) were skipped. These may be required to solve JS challenges. You can enable these downloads with  --remote-components ejs:github  (recommended) or  --remote-components ejs:npm , respectively. For more information and alternatives, refer to  https://github.com/yt-dlp/yt-dlp/wiki/EJS',
+    'WARNING: [youtube] abc: Signature solving failed: Some formats may be missing. Ensure you have a supported JavaScript runtime and challenge solver script distribution installed. Review any warnings presented before this message. For more details, refer to  https://github.com/yt-dlp/yt-dlp/wiki/EJS',
+    'ERROR: [youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users.',
+  ].join('\n');
+
+  it('extrae la linea ERROR aunque vaya detras de warnings largos', async () => {
+    const { relevantStderr } = await import('./yt-dlp-media-extractor');
+    const out = relevantStderr(youtubeStderr);
+
+    expect(out).toContain('Sign in to confirm your age');
+    expect(out).not.toContain('WARNING');
+  });
+
+  it('cae a la COLA de stderr cuando no hay ninguna linea ERROR', async () => {
+    const { relevantStderr } = await import('./yt-dlp-media-extractor');
+    const noError = `${'x'.repeat(600)}\nlo ultimo que dijo`;
+
+    expect(relevantStderr(noError)).toContain('lo ultimo que dijo');
+  });
+});
