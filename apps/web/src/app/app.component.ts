@@ -1,43 +1,39 @@
-import { HttpClient } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { Component } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet],
   template: `
-    <main class="shell">
-      <section class="card">
-        <p class="eyebrow">YouTube · TikTok · Instagram · Facebook · X</p>
-        <h1>Descarga tus videos.</h1>
-        <p class="muted">Pega una URL pública o autorizada y analiza los formatos disponibles.</p>
-        <div class="row">
-          <input [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://..." />
-          <button (click)="analyze()" [disabled]="loading() || !url()">{{ loading() ? 'Analizando…' : 'Analizar' }}</button>
-        </div>
-        @if (error()) { <p class="error">{{ error() }}</p> }
-        @if (media(); as item) {
-          <div class="result">
-            @if (item.thumbnail) { <img [src]="item.thumbnail" alt="Miniatura" /> }
-            <div><strong>{{ item.title }}</strong><p class="muted">{{ item.platform }}</p></div>
-          </div>
-        }
-      </section>
-    </main>`
+    <nav class="top-nav">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Downloader</a>
+      <a routerLink="/studio" routerLinkActive="active">Studio</a>
+    </nav>
+    <router-outlet></router-outlet>
+  `,
+  styles: [`
+    .top-nav {
+      display: flex;
+      gap: 4px;
+      padding: 12px 20px;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .top-nav a {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .top-nav a:hover { color: var(--color-text); background: var(--color-bg); }
+    .top-nav a.active { color: var(--color-accent); background: rgba(59, 130, 246, 0.1); }
+  `],
 })
-export class AppComponent {
-  private readonly http = inject(HttpClient);
-  readonly url = signal('');
-  readonly loading = signal(false);
-  readonly error = signal('');
-  readonly media = signal<any>(null);
-
-  analyze(): void {
-    this.loading.set(true); this.error.set(''); this.media.set(null);
-    this.http.post<any>('http://localhost:3000/api/media/analyze', { url: this.url() }).subscribe({
-      next: data => { this.media.set(data); this.loading.set(false); },
-      error: err => { this.error.set(err?.error?.message ?? 'No se pudo analizar la URL'); this.loading.set(false); }
-    });
-  }
-}
+export class AppComponent {}

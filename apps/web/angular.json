@@ -7,9 +7,31 @@
       "root": "",
       "sourceRoot": "src",
       "architect": {
-        "build": { "builder": "@angular/build:application", "options": { "browser": "src/main.ts", "index": "src/index.html", "tsConfig": "tsconfig.app.json", "styles": ["src/styles.css"] } },
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "src/main.ts",
+            "index": "src/index.html",
+            "polyfills": ["zone.js"],
+            "tsConfig": "tsconfig.app.json",
+            "styles": ["src/styles.css"]
+          },
+          "configurations": {
+            "production": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.prod.ts"
+                }
+              ]
+            }
+          }
+        },
         "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "web:build" } }
       }
     }
+  },
+  "cli": {
+    "analytics": "974293e3-9652-4709-8f64-c420f0d2e595"
   }
 }

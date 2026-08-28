@@ -7,3 +7,9 @@ dist/
 temp/
 .DS_Store
 coverage/
+playwright-report/
+test-results/
+
+# Notas locales con credenciales — NUNCA commitear
+docts/
+.playwright-mcp/

@@ -1,18 +1,35 @@
 {
   "name": "@social-downloader/web",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
-  "scripts": { "start": "ng serve", "build": "ng build", "lint": "echo lint-pending" },
+  "scripts": {
+    "start": "ng serve --host 0.0.0.0 --port 4205",
+    "build": "ng build",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --exclude 'tests/**'",
+    "test:e2e": "playwright test"
+  },
   "dependencies": {
+    "@social-downloader/contracts": "workspace:*",
     "@angular/common": "^20.2.0",
+    "@angular/compiler": "^20.2.0",
     "@angular/core": "^20.2.0",
+    "@angular/forms": "^20.2.0",
     "@angular/platform-browser": "^20.2.0",
+    "@angular/platform-browser-dynamic": "^20.2.0",
     "@angular/router": "^20.2.0",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "tailwindcss": "^3.4.17",
+    "zone.js": "^0.15.0"
   },
   "devDependencies": {
     "@angular/build": "^20.2.0",
     "@angular/cli": "^20.2.0",
-    "typescript": "^5.9.2"
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "typescript": "^5.9.2",
+    "vitest": "^2.1.8"
   }
 }
