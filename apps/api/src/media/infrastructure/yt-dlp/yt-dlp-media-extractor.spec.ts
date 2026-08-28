@@ -78,6 +78,27 @@ describe('YtDlpMediaExtractor', () => {
 
   // Hacen falta dos a la vez en cuanto se usa el proyecto de verdad: YouTube necesita
   // `player_client` para los videos con restriccion de edad y TikTok su `api_hostname`.
+  it('descarta los storyboards de la lista de formatos', async () => {
+    const child = new FakeChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const pending = new YtDlpMediaExtractor().analyze(new URL('https://youtu.be/demo'));
+    await waitForSpawn();
+
+    child.stdout.emit('data', Buffer.from(JSON.stringify({
+      title: 'demo',
+      formats: [
+        { format_id: 'sb0', ext: 'mhtml', format_note: 'storyboard' },
+        { format_id: 'sb1', ext: 'mhtml', format_note: 'storyboard' },
+        { format_id: '96', ext: 'mp4', height: 1080, vcodec: 'avc1', acodec: 'mp4a' },
+      ],
+    })));
+    child.simulateClose(0);
+
+    const meta = await pending;
+    expect(meta.formats.map((f) => f.id)).toEqual(['96']);
+  });
+
   it('pasa un --extractor-args por cada grupo separado con |', async () => {
     process.env.YTDLP_EXTRACTOR_ARGS =
       'youtube:player_client=default,web_safari | tiktok:api_hostname=api22.example.com';

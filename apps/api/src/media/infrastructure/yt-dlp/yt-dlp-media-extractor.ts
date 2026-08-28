@@ -193,6 +193,10 @@ export class YtDlpMediaExtractor {
 
     return formats
       .filter((format) => typeof format.id === 'string' || typeof format.format_id === 'string')
+      // Los storyboards son la tira de miniaturas de la barra de progreso, no un formato
+      // descargable. yt-dlp los devuelve mezclados con los demas (4 de los 11 en un video
+      // de YouTube), y acababan ofreciendose en la interfaz como si se pudieran elegir.
+      .filter((format) => format.ext !== 'mhtml' && format.format_note !== 'storyboard')
       .map((format) => ({
         id: String(format.id ?? format.format_id ?? 'unknown'),
         ext: String(format.ext ?? 'unknown'),
