@@ -74,9 +74,18 @@ export class YtDlpMediaExtractor {
      * Es la que devuelve el vídeo sin marca de agua, y no comparte los límites del scraping
      * web. Ejemplo: "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com".
      */
+    /**
+     * Se separan con `|` porque hace falta uno por extractor y las descargas reales ya piden
+     * dos a la vez: YouTube necesita `player_client` para los videos con restriccion de edad
+     * y TikTok su `api_hostname`. Ni `,` ni `;` sirven de separador, que son la sintaxis
+     * interna de yt-dlp (`youtube:player_client=default,web_safari;formats=incomplete`).
+     */
     const extractorArgs = process.env.YTDLP_EXTRACTOR_ARGS?.trim();
     if (extractorArgs) {
-      args.push('--extractor-args', extractorArgs);
+      for (const group of extractorArgs.split('|')) {
+        const trimmed = group.trim();
+        if (trimmed) args.push('--extractor-args', trimmed);
+      }
     }
 
     /**

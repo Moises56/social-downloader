@@ -76,6 +76,32 @@ describe('YtDlpMediaExtractor', () => {
     vi.useRealTimers();
   });
 
+  // Hacen falta dos a la vez en cuanto se usa el proyecto de verdad: YouTube necesita
+  // `player_client` para los videos con restriccion de edad y TikTok su `api_hostname`.
+  it('pasa un --extractor-args por cada grupo separado con |', async () => {
+    process.env.YTDLP_EXTRACTOR_ARGS =
+      'youtube:player_client=default,web_safari | tiktok:api_hostname=api22.example.com';
+    const child = new FakeChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const pending = new YtDlpMediaExtractor()
+      .analyze(new URL('https://youtu.be/demo'))
+      .catch((e: unknown) => e);
+    await waitForSpawn();
+
+    const args = vi.mocked(spawn).mock.calls[0]?.[1] as string[];
+    const groups = args.filter((_, i) => args[i - 1] === '--extractor-args');
+
+    expect(groups).toEqual([
+      'youtube:player_client=default,web_safari',
+      'tiktok:api_hostname=api22.example.com',
+    ]);
+
+    child.simulateClose(1);
+    await pending;
+    delete process.env.YTDLP_EXTRACTOR_ARGS;
+  });
+
   it('ejecuta SIGTERM cuando el signal aborta durante download', async () => {
     const child = new FakeChildProcess();
     vi.mocked(spawn).mockReturnValue(child as never);

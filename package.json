@@ -9,7 +9,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
-    "format": "pnpm -r exec prettier --write ."
+    "format": "pnpm -r exec prettier --write .",
+    "cookies": "./scripts/export-cookies.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
